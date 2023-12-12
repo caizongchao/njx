@@ -1,0 +1,10 @@
+*.dll
+.xmake/
+.vscode/
+.vs/
+.fetch/
+build/
+bin/
+deps/
+logs/
+temp/
