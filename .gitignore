@@ -1,3 +1,5 @@
+*.exe
+*.dbg
 *.dll
 .xmake/
 .vscode/

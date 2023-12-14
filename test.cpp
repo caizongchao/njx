@@ -1,6 +1,12 @@
 #include "ljx.h"
 #include <assert.h>
 
+#ifdef __x86_64__
+int a = 1;
+#else
+int a = 2;
+#endif
+
 int foo() { return 0; }
 
 int main() {
@@ -11,7 +17,7 @@ int main() {
 
     t.resume();
 
-    printf("foo bar\n");
+    printf("foo bar: %d\n", a);
 
     return 0;
 }
