@@ -133,8 +133,6 @@ struct lua_table {
 
     lua_table & operator=(lua_table const & x) { value = x.value; return *this; }
 
-    lua_table & operator=(lua_table && x) { value = x.value; x.value = nullptr; return *this; }
-
     lua_table & operator=(GCtab * x) { value = x; return *this; }
 
     bool operator==(std::nullptr_t) const { return value == nullptr; }
@@ -192,6 +190,63 @@ struct lua_table {
             }
         }
     }
+};
+
+struct lua_string {
+    GCstr * value {nullptr};
+
+    lua_string() = default;
+
+    lua_string(GCstr * value) : value(value) {}
+
+    lua_string(lua_value const & t) { this->value = tvisstr(t) ? strV(t) : nullptr; }
+
+    lua_string(lua_string const &) = default;
+
+    operator GCstr *() const { return value; }
+
+    operator bool() const { return value != nullptr; }
+
+    lua_string & operator=(lua_string const & x) { value = x.value; return *this; }
+
+    bool operator==(std::nullptr_t) const { return value == nullptr; }
+
+    bool operator==(lua_string const & x) const { return value == x.value; }
+
+    operator std::string_view() const { return {strdata(value), value->len}; }
+
+    operator const char *() const { return strdata(value); }
+
+    const char * c_str() const { return strdata(value); }
+};
+
+
+struct lua_gcobj {
+    GCobj * value {nullptr};
+
+    lua_gcobj() = default;
+
+    lua_gcobj(GCobj * value) : value(value) {}
+
+    lua_gcobj(lua_value const & t) { this->value = tvisgcv(t) ? gcV(t) : nullptr; }
+
+    lua_gcobj(lua_gcobj const &) = default;
+
+    operator GCobj *() const { return value; }
+
+    operator bool() const { return value != nullptr; }
+
+    lua_gcobj & operator=(lua_gcobj const & x) { value = x.value; return *this; }
+
+    bool operator==(std::nullptr_t) const { return value == nullptr; }
+
+    bool operator==(lua_gcobj const & x) const { return value == x.value; }
+
+    int type() const { return ~(value->gch.gct); }
+
+    lua_table & as_table() const { return *(lua_table *)this; }
+
+    lua_string & as_string() const { return *(lua_string *)this; }
 };
 
 struct lua_state;
@@ -368,8 +423,8 @@ inline lua_value lua_table::operator[](std::string_view const & name) const {
 }
 
 inline lua_value lua_table::operator()(std::string_view const & name) const {
-    lua_value r {value}; GCtab * t {tabV(r)}; 
-    
+    lua_value r {value}; GCtab * t {tabV(r)};
+
     char sep = '.'; size_t i = 0; while(true) {
         size_t j = name.find(sep, i); if(j == std::string_view::npos) j = name.size();
 
@@ -382,7 +437,7 @@ inline lua_value lua_table::operator()(std::string_view const & name) const {
         r = *xp; if((j < name.size()) && !tvistab(r)) {
             r = lua_nil; break;
         }
-        
+
         t = tabV(r); i = j + 1;
     }
 
