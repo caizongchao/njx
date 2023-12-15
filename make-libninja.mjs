@@ -33,7 +33,6 @@ var src = [
     'deps/ninja/src/hash_collision_bench.cc',
     'deps/ninja/src/json.cc',
     'deps/ninja/src/lexer.cc',
-    'deps/ninja/src/lexer.in.cc',
     'deps/ninja/src/line_printer.cc',
     'deps/ninja/src/manifest_parser.cc',
     'deps/ninja/src/metrics.cc',
@@ -57,7 +56,6 @@ var src = [
 var build_dir = 'build/ninja/'; {
     if (!fs.existsSync(build_dir)) fs.mkdirSync(build_dir);
 }
-
 
 var cc = 'cosmoc++ -O2 -c -Ideps/ninja/src '
 

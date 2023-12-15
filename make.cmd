@@ -13,5 +13,5 @@
 @REM cosmocc -O2 -c deps/luajit/src/luajit.c -I deps/luajit/src -o build/luajit.o  -DLUAJIT_OS=5
 
 cosmoc++ -c clib_syms.cpp -o build/clib_syms.o
-cosmoc++ -c ninja_api.cpp -o build/ninja_api.o -I deps/ninja/src
-cosmocc -o luajit.exe build/luajit.o build/clib_syms.o build/ljamalg.o build/unwind.o deps/luajit/src/lj_vm.o -L build -lninja
+cosmoc++ -c ninja_api.cpp -o build/ninja_api.o -Ideps/ninja/src  -Ideps/LuaJIT/src -std=c++20
+cosmoc++ -o luajit.exe build/luajit.o build/clib_syms.o build/ljamalg.o build/unwind.o build/ninja_api.o deps/luajit/src/lj_vm.o -L build -lninja

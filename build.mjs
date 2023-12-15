@@ -12,7 +12,7 @@ var compiling = false;
 watcher.on('change', fpath => {
     if (compiling) return;
 
-    if (fpath.endsWith('.c') || fpath.endsWith('.cpp') || fpath.endsWith('.cmd')) {
+    if (fpath.endsWith('.c') || fpath.endsWith('.cpp') || fpath.endsWith('.h') || fpath.endsWith('.cmd')) {
         compiling = true; console.log('making...');
 
         const child = exec(`make.cmd`, (error, stdout, stderr) => {
