@@ -13,6 +13,8 @@
 
 namespace fs = std::filesystem;
 
+static std::string $buf;
+
 static State $state;
 static BuildConfig $config;
 static std::string $builddir = "build";
@@ -29,7 +31,7 @@ const char * ninja_builddir_get() { return $builddir.c_str(); }
 void ninja_builddir_set(const char * path) { $builddir = path; }
 void ninja_reset(void * state) { ((State *)state)->Reset(); }
 void ninja_dump(void * state) { ((State *)state)->Dump(); }
-const char * ninja_var_get(void * state, const char * key) { return ((State *)state)->bindings_.LookupVariable(key).c_str(); }
+const char * ninja_var_get(void * state, const char * key) { $buf = ((State *)state)->bindings_.LookupVariable(key); return $buf.c_str(); }
 void ninja_var_set(void * state, const char * key, const char * value) { ((State *)state)->bindings_.AddBinding(key, value); }
 void ninja_pool_add(void * state, void * pool) { ((State *)state)->AddPool((Pool *)pool); }
 void * ninja_pool_lookup(void * state, const char * name) { return ((State *)state)->LookupPool(name); }
@@ -46,13 +48,76 @@ void * ninja_rule_get(void * rule, const char * key) { return (void *)((Rule *)r
 void ninja_rule_set(void * rule, const char * key, const char * value) { EvalString es; ninja_evalstring_read(value, &es, false); ((Rule *)rule)->AddBinding(key, es); }
 bool ninja_rule_isreserved(void * rule, const char * key) { return ((Rule *)rule)->IsReservedBinding(key); }
 
-void ninja_build(const char * path) {
-    // ensure builddir exists
-    if(!fs::exists($builddir)) fs::create_directories($builddir);
-    if(!fs::is_directory($builddir)) fatal("cannot create builddir");
+extern lua_State * __L;
+
+void * ninja_build(lua_value a) {
+    // lua_value x; memcpy(&x, &a, sizeof(tvalue));
+
+    printf("i: %d\n", a.to_int());
+
+    return lj_str_newz(__L, "ret string");
 }
 
-void ninja_clean(const char * path) {}
+// void * ninja_build(lua_value x) {
+//     lua_table t = x;
+
+//     auto & args = t.array<4>();
+
+//     auto [_, a, b, c] = args;
+
+//     printf("gctab: %d, %d, %d\n", (int)a, (int)b, (int)c);
+
+//     return lj_str_newz(__L, "ret string");
+// }
+
+// void * ninja_build(lua_table t) {
+//     auto & args = t.array<4>();
+
+//     auto [_, a, b, c] = args;
+
+//     printf("gctab: %d, %d, %d\n", (int)a, (int)b, (int)c);
+
+//     return lj_str_newz(__L, "ret string");
+// }
+
+// void * ninja_build(lua_value what) {
+//     printf("ninja_build ===> %s\n", what.c_str());
+
+//     return lj_str_newz(__L, "ret string");
+// }
+
+// void ninja_build(lua_gcobj what) {
+// void ninja_build(lua_string what) {
+//     printf("ninja_build ===> %s\n", what.c_str());
+// if(!what) return;
+
+// int type = what.type();
+
+// std::vector<std::string> paths; if(type == LJ_TSTR) {
+//     printf("%s\n", what.as_string().c_str());
+//     paths.push_back(what.as_string().c_str());
+// }
+// else if(type == LJ_TTAB) {
+//     lua_table const & t = what.as_table(); t.for_ipairs([&](int, lua_value const & v) {
+//         if(v.is_string()) {
+//             printf("%s\n", v.c_str());
+//             paths.push_back(v.c_str());
+//         }
+//         else {
+//             fatal("invalid argument to ninja_build");
+//         }
+//     });
+// }
+// else {
+//     fatal("invalid argument to ninja_build");
+// }
+
+// ensure builddir exists
+// if(!fs::exists($builddir)) fs::create_directories($builddir);
+// if(!fs::is_directory($builddir)) fatal("cannot create build directory: ");
+// }
+
+void ninja_clean(lua_gcobj what) {}
 }
 
 static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path) {

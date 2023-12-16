@@ -17,10 +17,11 @@ ffi.cdef [[
         //DepfileParserOptions depfile_parser_options;
     } ninja_config_t;
 
-    void * ninja_state();
+    void ninja_initialize();
     ninja_config_t * ninja_config();
-    const char * ninja_build_dir_get();
-    void ninja_build_dir_set(const char * path);
+    const char * ninja_builddir_get();
+    //void ninja_builddir_set(const char * path);
+    void ninja_builddir_set(gcptr path);
     void ninja_reset(void * state);
     void ninja_dump(void * state);
     const char * ninja_var_get(void * state, const char * key);
@@ -39,15 +40,17 @@ ffi.cdef [[
     void * ninja_rule_get(void * rule, const char * key);
     void ninja_rule_set(void * rule, const char * key, const char * value);
     bool ninja_rule_isreserved(void * rule, const char * key);
+    void ninja_build(gcptr path);
     
 ]]
 
-local ninja = ffi.C.ninja_state()
 local config = ffi.C.ninja_config()
-local build_dir = ffi.string(ffi.C.ninja_build_dir_get())
+local build_dir = ffi.string(ffi.C.ninja_builddir_get())
 
-print('start', ninja)
+print('start')
 
 print(config.dry_run, config.parallelism, build_dir)
+
+ffi.C.ninja_build({"foo"})
 
 print('done')

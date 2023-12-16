@@ -21,7 +21,11 @@ extern "C" {
 
 #include "function.h"
 
-struct tvalue { uint64_t value; };
+struct tvalue {
+    double value;
+
+    int to_int() const { return (int)value; }
+};
 
 struct lua_table;
 
@@ -78,8 +82,6 @@ struct lua_value {
 
     operator double() const { return numV(&value); }
 
-    operator tvalue() const { return {value.u64}; }
-
     operator std::string_view() const {
         if(tvisnil(&value)) return {}; else { auto str = strV(&value); return {strdata(str), str->len}; }
     }
@@ -103,6 +105,8 @@ struct lua_value {
     double to_double(double defvalue = 0) const { return tvisnum(&value) ? numV(&value) : defvalue; }
     std::string_view to_string(std::string_view defvalue = {}) const { return tvisstr(&value) ? std::string_view(strVdata(&value), strV(&value)->len) : defvalue; }
     const char * to_cstr(const char * defvalue = nullptr) const { return tvisstr(&value) ? strVdata(&value) : defvalue; }
+
+    const char * c_str() const { return strVdata(&value); }
 };
 
 inline lua_value lua_nil;
@@ -121,11 +125,10 @@ struct lua_table {
     static lua_table make();
     static lua_table make(size_t asize, size_t hbits);
 
-    lua_value * begin() const { return mref(value->array, lua_value); }
-    lua_value * end() const { return begin() + value->asize; }
-
     template<size_t N>
-    std::array<lua_value, N> & array() const { auto x = begin() + 1; return (std::array<lua_value, N> &)*x; }
+    std::array<lua_value, N> & array() const { auto x = mref(value->array, lua_value); return (std::array<lua_value, N> &)*x; }
+
+    size_t asize() const { return value->asize; }
 
     operator GCtab *() const { return value; }
 
@@ -163,30 +166,53 @@ struct lua_table {
 
     template<typename F>
     void for_pairs(F && f) const {
+        typedef function_traits<F> fx_traits;
+
+        const bool no_return = std::is_same_v<typename fx_traits::result, void>;
+
         GCtab * t = value; TValue * tv = tvref(t->array); auto c = t->asize;
 
-        for(size_t i = 1; i < c; ++i) {
+        for(size_t i = 0; i < c; ++i) {
             if(!tvisnil(tv + i)) {
-                if(!f(i, (lua_value &)(tv[i]))) return;
+                lua_value k = i; if constexpr(no_return) {
+                    f(k, (lua_value &)(tv[i]));
+                }
+                else {
+                    if(!f(k, (lua_value &)(tv[i]))) return;
+                }
             }
         }
 
-        TNode * n = noderef(t->node); TNode * ne = n + t->hmask + 1;
+        TNode * n = mref(t->node, TNode); TNode * ne = n + t->hmask + 1;
 
         for(; n < ne; n++) {
             if(!tvisnil(&n->val)) {
-                if(!f((lua_value &)n->key, (lua_value &)n->val)) return;
+                if constexpr(no_return) {
+                    f((lua_value &)n->key, (lua_value &)n->val);
+                }
+                else {
+                    if(!f((lua_value &)n->key, (lua_value &)n->val)) return;
+                }
             }
         }
     }
 
     template<typename F>
     void for_ipairs(F && f) const {
+        typedef function_traits<F> fx_traits;
+
+        const bool no_return = std::is_same_v<typename fx_traits::result, void>;
+
         GCtab * t = value; TValue * tv = tvref(t->array); auto c = t->asize;
 
-        for(size_t i = 1; i < c; ++i) {
+        for(size_t i = 0; i < c; ++i) {
             if(!tvisnil(tv + i)) {
-                if(!f(i, (lua_value &)(tv[i]))) return;
+                if constexpr(no_return) {
+                    f(i, (lua_value &)(tv[i]));
+                }
+                else {
+                    if(!f(i, (lua_value &)(tv[i]))) return;
+                }
             }
         }
     }
@@ -219,7 +245,6 @@ struct lua_string {
 
     const char * c_str() const { return strdata(value); }
 };
-
 
 struct lua_gcobj {
     GCobj * value {nullptr};

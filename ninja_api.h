@@ -4,8 +4,10 @@
 extern "C" {
 #endif
 
+struct lua_gcobj;
+
 // extern void * ninja_state;
-void * ninja_initialize();
+void ninja_initialize();
 void * ninja_config();
 const char * ninja_builddir_get();
 void ninja_builddir_set(const char * path);
@@ -27,8 +29,8 @@ const char * ninja_rule_name(void * rule);
 void * ninja_rule_get(void * rule, const char * key);
 void ninja_rule_set(void * rule, const char * key, const char * value);
 bool ninja_rule_isreserved(void * rule, const char * key);
-void ninja_build(const char * path);
-void ninja_clean(const char * path);
+void * ninja_build(void *);
+void ninja_clean(void *);
 
 #ifdef __cplusplus
 }
