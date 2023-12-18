@@ -1,9 +1,11 @@
 #include <state.h>
 #include <eval_env.h>
 #include <build.h>
+#include <clean.h>
 #include <disk_interface.h>
 #include <build_log.h>
 #include <deps_log.h>
+#include <status.h>
 #include <util.h>
 
 #include "ljx.h"
@@ -13,14 +15,79 @@
 
 namespace fs = std::filesystem;
 
+extern lua_State * __L;
+
+struct NinjaMain : public BuildLogUser {
+    /// Command line used to run Ninja.
+    const char * ninja_command_;
+
+    /// Build configuration set from flags (e.g. parallelism).
+    const BuildConfig & config_;
+
+    /// Loaded state (rules, nodes).
+    State state_;
+
+    /// Functions for accessing the disk.
+    RealDiskInterface disk_interface_;
+
+    /// The build directory, used for storing the build log etc.
+    std::string build_dir_;
+
+    BuildLog build_log_;
+    DepsLog deps_log_;
+
+    int64_t start_time_millis_;
+
+    NinjaMain(const char * ninja_command, const BuildConfig & config);
+
+    /// Get the Node for a given command-line path, handling features like
+    /// spell correction.
+    Node * CollectTarget(const char * cpath, std::string * err);
+
+    /// CollectTarget for all command-line arguments, filling in \a targets.
+    bool CollectTargetsFromArgs(int argc, char * argv[],
+        std::vector<Node *> * targets, std::string * err);
+
+    /// Open the build log.
+    /// @return false on error.
+    bool OpenBuildLog(bool recompact_only = false);
+
+    /// Open the deps log: load it, then open for writing.
+    /// @return false on error.
+    bool OpenDepsLog(bool recompact_only = false);
+
+    /// Ensure the build directory exists, creating it if necessary.
+    /// @return false on error.
+    bool EnsureBuildDirExists();
+
+    /// Rebuild the manifest, if necessary.
+    /// Fills in \a err on error.
+    /// @return true if the manifest was rebuilt.
+    bool RebuildManifest(const char * input_file, std::string * err, Status * status);
+
+    /// Build the targets listed on the command line.
+    /// @return an exit code.
+    int RunBuild(int argc, char ** argv, Status * status);
+
+    /// Dump the output requested by '-d stats'.
+    void DumpMetrics();
+
+    virtual bool IsPathDead(StringPiece s) const;
+};
+
+static std::string $builddir = "build";
+static std::string $logpath = ".ninja_log";
+static std::string $depspath = ".ninja_deps";
+
 static std::string $buf;
 
-static State $state;
+// static State $state;
 static BuildConfig $config;
-static std::string $builddir = "build";
-static RealDiskInterface $disk_interface;
-static BuildLog $build_log;
-static DepsLog $deps_log;
+// static RealDiskInterface $disk_interface;
+// static BuildLog $build_log;
+// static DepsLog $deps_log;
+
+static NinjaMain $ninja(nullptr, $config);
 
 static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path);
 
@@ -48,76 +115,32 @@ void * ninja_rule_get(void * rule, const char * key) { return (void *)((Rule *)r
 void ninja_rule_set(void * rule, const char * key, const char * value) { EvalString es; ninja_evalstring_read(value, &es, false); ((Rule *)rule)->AddBinding(key, es); }
 bool ninja_rule_isreserved(void * rule, const char * key) { return ((Rule *)rule)->IsReservedBinding(key); }
 
-extern lua_State * __L;
+void ninja_build(lua_gcptr targets) {
+    StatusPrinter status($config); std::vector<const char *> paths;
 
-void * ninja_build(lua_value a) {
-    // lua_value x; memcpy(&x, &a, sizeof(tvalue));
+    if(targets) {
+        if(targets.is_string()) {
+            paths.push_back(targets.as_string().c_str());
+        }
+        else if(targets.is_table()) {
+            lua_table const & t = targets.as_table();
 
-    printf("i: %d\n", a.to_int());
+            t.for_ipairs([&](int, lua_value const & v) {
+                if(v.is_string()) paths.push_back(v.c_str());
+            });
+        }
+    }
 
-    return lj_str_newz(__L, "ret string");
+    if(paths.empty()) {
+        status.Info("no targets to build"); return;
+    }
+
+    $ninja.RunBuild(paths.size(), (char **)paths.data(), &status);
 }
 
-// void * ninja_build(lua_value x) {
-//     lua_table t = x;
-
-//     auto & args = t.array<4>();
-
-//     auto [_, a, b, c] = args;
-
-//     printf("gctab: %d, %d, %d\n", (int)a, (int)b, (int)c);
-
-//     return lj_str_newz(__L, "ret string");
-// }
-
-// void * ninja_build(lua_table t) {
-//     auto & args = t.array<4>();
-
-//     auto [_, a, b, c] = args;
-
-//     printf("gctab: %d, %d, %d\n", (int)a, (int)b, (int)c);
-
-//     return lj_str_newz(__L, "ret string");
-// }
-
-// void * ninja_build(lua_value what) {
-//     printf("ninja_build ===> %s\n", what.c_str());
-
-//     return lj_str_newz(__L, "ret string");
-// }
-
-// void ninja_build(lua_gcobj what) {
-// void ninja_build(lua_string what) {
-//     printf("ninja_build ===> %s\n", what.c_str());
-// if(!what) return;
-
-// int type = what.type();
-
-// std::vector<std::string> paths; if(type == LJ_TSTR) {
-//     printf("%s\n", what.as_string().c_str());
-//     paths.push_back(what.as_string().c_str());
-// }
-// else if(type == LJ_TTAB) {
-//     lua_table const & t = what.as_table(); t.for_ipairs([&](int, lua_value const & v) {
-//         if(v.is_string()) {
-//             printf("%s\n", v.c_str());
-//             paths.push_back(v.c_str());
-//         }
-//         else {
-//             fatal("invalid argument to ninja_build");
-//         }
-//     });
-// }
-// else {
-//     fatal("invalid argument to ninja_build");
-// }
-
-// ensure builddir exists
-// if(!fs::exists($builddir)) fs::create_directories($builddir);
-// if(!fs::is_directory($builddir)) fatal("cannot create build directory: ");
-// }
-
-void ninja_clean(lua_gcobj what) {}
+void ninja_clean() {
+    Cleaner cleaner(&$ninja.state_, $config, &$ninja.disk_interface_); cleaner.CleanAll(true);
+}
 }
 
 static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path) {

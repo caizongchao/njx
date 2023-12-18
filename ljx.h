@@ -13,8 +13,8 @@ constexpr bool failed(T * x) { return x == nullptr; }
 template<typename T>
 constexpr bool failed(T && x) { return x < 0; }
 
-static inline void fatal(const char * msg) { printf("[fatal] %s\n", msg); exit(-1); }
-static inline void fatal(const std::string & msg) { fatal(msg.c_str()); }
+static inline bool fatal(const char * msg) { printf("[fatal] %s\n", msg); exit(-1); return true; }
+static inline bool info(const char * msg)  { printf("[info ] %s\n", msg); return true; }
 
 static inline struct {
     template<typename T>

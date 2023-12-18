@@ -246,31 +246,33 @@ struct lua_string {
     const char * c_str() const { return strdata(value); }
 };
 
-struct lua_gcobj {
+struct lua_gcptr {
     GCobj * value {nullptr};
 
-    lua_gcobj() = default;
+    lua_gcptr() = default;
 
-    lua_gcobj(GCobj * value) : value(value) {}
+    lua_gcptr(GCobj * value) : value(value) {}
 
-    lua_gcobj(lua_value const & t) { this->value = tvisgcv(t) ? gcV(t) : nullptr; }
+    lua_gcptr(lua_value const & t) { this->value = tvisgcv(t) ? gcV(t) : nullptr; }
 
-    lua_gcobj(lua_gcobj const &) = default;
+    lua_gcptr(lua_gcptr const &) = default;
 
     operator GCobj *() const { return value; }
 
     operator bool() const { return value != nullptr; }
 
-    lua_gcobj & operator=(lua_gcobj const & x) { value = x.value; return *this; }
+    lua_gcptr & operator=(lua_gcptr const & x) { value = x.value; return *this; }
 
     bool operator==(std::nullptr_t) const { return value == nullptr; }
 
-    bool operator==(lua_gcobj const & x) const { return value == x.value; }
+    bool operator==(lua_gcptr const & x) const { return value == x.value; }
 
     int type() const { return ~(value->gch.gct); }
 
-    lua_table & as_table() const { return *(lua_table *)this; }
+    bool is_string() const { return value->gch.gct == ~LJ_TSTR; }
+    bool is_table() const { return value->gch.gct == ~LJ_TTAB; }
 
+    lua_table & as_table() const { return *(lua_table *)this; }
     lua_string & as_string() const { return *(lua_string *)this; }
 };
 

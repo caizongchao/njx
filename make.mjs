@@ -22,7 +22,6 @@ var ninja_src = [
     'deps/ninja/src/clparser.cc',
     'deps/ninja/src/debug_flags.cc',
     'deps/ninja/src/depfile_parser.cc',
-    'deps/ninja/src/depfile_parser.in.cc',
     'deps/ninja/src/deps_log.cc',
     'deps/ninja/src/disk_interface.cc',
     'deps/ninja/src/dyndep.cc',
@@ -32,7 +31,6 @@ var ninja_src = [
     'deps/ninja/src/getopt.c',
     'deps/ninja/src/graph.cc',
     'deps/ninja/src/graphviz.cc',
-    'deps/ninja/src/hash_collision_bench.cc',
     'deps/ninja/src/json.cc',
     'deps/ninja/src/lexer.cc',
     'deps/ninja/src/line_printer.cc',
@@ -58,7 +56,7 @@ var ninja_build_dir = 'build/ninja/'; {
     if (!fs.existsSync(ninja_build_dir)) fs.mkdirSync(ninja_build_dir);
 }
 
-var ninja_cc = `cosmoc++ ${OPT} -c -Ideps/ninja/src `
+var ninja_cc = `cosmoc++ ${OPT} -c -Ideps/ninja/src -D__BUILD_LIB__ `
 
 function is_up_to_date(src, dst) {
     try {
@@ -288,7 +286,7 @@ var compiling = false;
 watcher.on('change', async (fpath) => {
     if (compiling) return;
 
-    if (fpath.endsWith('.c') || fpath.endsWith('.cpp') || fpath.endsWith('.h')) {
+    if (fpath.endsWith('.c') || fpath.endsWith('.cpp') || fpath.endsWith('.cc') || fpath.endsWith('.h')) {
         compiling = true;
 
         await make_ljx();
