@@ -1,4 +1,4 @@
-ffi = require('ffi')
+ffi = require('ffi'); local jit_v = require("jit.v"); jit_v.on()
 
 ffi.cdef [[
     enum {
@@ -17,40 +17,33 @@ ffi.cdef [[
         //DepfileParserOptions depfile_parser_options;
     } ninja_config_t;
 
-    void ninja_initialize();
+    void ninja_test(const char * msg);
     ninja_config_t * ninja_config();
-    const char * ninja_builddir_get();
-    //void ninja_builddir_set(const char * path);
-    void ninja_builddir_set(gcptr path);
-    void ninja_reset(void * state);
-    void ninja_dump(void * state);
-    const char * ninja_var_get(void * state, const char * key);
-    void ninja_var_set(void * state, const char * key, const char * value);
-    void ninja_pool_add(void * state, void * pool);
-    void * ninja_pool_lookup(void * state, const char * name);
-    void * ninja_edge_add(void * state, void * rule);
-    void ninja_edge_addin(void * state, void * edge, const char * path, uint64_t slash_bits);
-    void ninja_edge_addout(void * state, void * edge, const char * path, uint64_t slash_bits);
-    void ninja_edge_addvalidation(void * state, void * edge, const char * path, uint64_t slash_bits);
-    void * ninja_node_get(void * state, const char * path, uint64_t slash_bits);
-    void * ninja_node_lookup(void * state, const char * path);
-    void * ninja_rule_add(void * state, const char * name);
-    void * ninja_rule_lookup(void * state, const char * name);
+    void ninja_reset();
+    void ninja_dump();
+    const char * ninja_var_get(const char * key);
+    void ninja_var_set(const char * key, const char * value);
+    void ninja_pool_add(void * pool);
+    void * ninja_pool_lookup(const char * name);
+    void * ninja_edge_add(void * rule);
+    void ninja_edge_addin(void * edge, const char * path, uint64_t slash_bits);
+    void ninja_edge_addout(void * edge, const char * path, uint64_t slash_bits);
+    void ninja_edge_addvalidation(void * edge, const char * path, uint64_t slash_bits);
+    void * ninja_node_lookup2(const char * path, uint64_t slash_bits);
+    void * ninja_node_lookup(const char * path);
+    void * ninja_rule_add(const char * name);
+    void * ninja_rule_lookup(const char * name);
     const char * ninja_rule_name(void * rule);
     void * ninja_rule_get(void * rule, const char * key);
     void ninja_rule_set(void * rule, const char * key, const char * value);
-    bool ninja_rule_isreserved(void * rule, const char * key);
-    void ninja_build(gcptr path);
     
+    void ninja_test(const char * msg);
 ]]
 
 local config = ffi.C.ninja_config()
-local build_dir = ffi.string(ffi.C.ninja_builddir_get())
 
 print('start')
 
-print(config.dry_run, config.parallelism, build_dir)
-
-ffi.C.ninja_build({"foo"})
+ffi.C.ninja_test('hello world')
 
 print('done')

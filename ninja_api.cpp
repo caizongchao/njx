@@ -6,6 +6,7 @@
 #include <build_log.h>
 #include <deps_log.h>
 #include <status.h>
+#include <metrics.h>
 #include <util.h>
 
 #include "ljx.h"
@@ -75,45 +76,42 @@ struct NinjaMain : public BuildLogUser {
     virtual bool IsPathDead(StringPiece s) const;
 };
 
-static std::string $builddir = "build";
-static std::string $logpath = ".ninja_log";
-static std::string $depspath = ".ninja_deps";
-
 static std::string $buf;
-
-// static State $state;
 static BuildConfig $config;
-// static RealDiskInterface $disk_interface;
-// static BuildLog $build_log;
-// static DepsLog $deps_log;
 
 static NinjaMain $ninja(nullptr, $config);
+
+static State & $state = $ninja.state_;
+
+__attribute__((constructor)) static void ninja_initialize() {
+    $config.parallelism = GetProcessorCount();
+}
 
 static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path);
 
 extern "C" {
-void ninja_initialize() { $config.parallelism = GetProcessorCount(); }
 void * ninja_config() { return (void *)&$config; }
-const char * ninja_builddir_get() { return $builddir.c_str(); }
-void ninja_builddir_set(const char * path) { $builddir = path; }
-void ninja_reset(void * state) { ((State *)state)->Reset(); }
-void ninja_dump(void * state) { ((State *)state)->Dump(); }
-const char * ninja_var_get(void * state, const char * key) { $buf = ((State *)state)->bindings_.LookupVariable(key); return $buf.c_str(); }
-void ninja_var_set(void * state, const char * key, const char * value) { ((State *)state)->bindings_.AddBinding(key, value); }
-void ninja_pool_add(void * state, void * pool) { ((State *)state)->AddPool((Pool *)pool); }
-void * ninja_pool_lookup(void * state, const char * name) { return ((State *)state)->LookupPool(name); }
-void * ninja_edge_add(void * state, void * rule) { return ((State *)state)->AddEdge((Rule *)rule); }
-void ninja_edge_addin(void * state, void * edge, const char * path, uint64_t slash_bits) { ((State *)state)->AddIn((Edge *)edge, path, slash_bits); }
-void ninja_edge_addout(void * state, void * edge, const char * path, uint64_t slash_bits) { ((State *)state)->AddOut((Edge *)edge, path, slash_bits, 0); }
-void ninja_edge_addvalidation(void * state, void * edge, const char * path, uint64_t slash_bits) { ((State *)state)->AddValidation((Edge *)edge, path, slash_bits); }
-void * ninja_node_get(void * state, const char * path, uint64_t slash_bits) { return ((State *)state)->GetNode(path, slash_bits); }
-void * ninja_node_lookup(void * state, const char * path) { return ((State *)state)->LookupNode(path); }
-void * ninja_rule_add(void * state, const char * name) { auto r = new Rule(name); ((State *)state)->bindings_.AddRule(r); return r; }
-void * ninja_rule_lookup(void * state, const char * name) { return (void *)((State *)state)->bindings_.LookupRule(name); }
+void ninja_reset() { $state.Reset(); }
+void ninja_dump() { $state.Dump(); }
+const char * ninja_var_get(const char * key) { $buf = $state.bindings_.LookupVariable(key); return $buf.c_str(); }
+void ninja_var_set(const char * key, const char * value) { $state.bindings_.AddBinding(key, value); }
+void ninja_pool_add(void * pool) { $state.AddPool((Pool *)pool); }
+void * ninja_pool_lookup(const char * name) { return $state.LookupPool(name); }
+void * ninja_edge_add(void * rule) { return $state.AddEdge((Rule *)rule); }
+void ninja_edge_addin(void * edge, const char * path, uint64_t slash_bits) { $state.AddIn((Edge *)edge, path, slash_bits); }
+void ninja_edge_addout(void * edge, const char * path, uint64_t slash_bits) { $state.AddOut((Edge *)edge, path, slash_bits, 0); }
+void ninja_edge_addvalidation(void * edge, const char * path, uint64_t slash_bits) { $state.AddValidation((Edge *)edge, path, slash_bits); }
+void * ninja_node_lookup2(const char * path, uint64_t slash_bits) { return $state.GetNode(path, slash_bits); }
+void * ninja_node_lookup(const char * path) { return $state.LookupNode(path); }
+void * ninja_rule_add(const char * name) { auto r = new Rule(name); $state.bindings_.AddRule(r); return r; }
+void * ninja_rule_lookup(const char * name) { return (void *)$state.bindings_.LookupRule(name); }
 const char * ninja_rule_name(void * rule) { return ((Rule *)rule)->name().c_str(); }
 void * ninja_rule_get(void * rule, const char * key) { return (void *)((Rule *)rule)->GetBinding(key); }
 void ninja_rule_set(void * rule, const char * key, const char * value) { EvalString es; ninja_evalstring_read(value, &es, false); ((Rule *)rule)->AddBinding(key, es); }
-bool ninja_rule_isreserved(void * rule, const char * key) { return ((Rule *)rule)->IsReservedBinding(key); }
+
+void ninja_test(const char * msg) {
+    printf("%s\n", msg);
+}
 
 void ninja_build(lua_gcptr targets) {
     StatusPrinter status($config); std::vector<const char *> paths;
@@ -135,7 +133,17 @@ void ninja_build(lua_gcptr targets) {
         status.Info("no targets to build"); return;
     }
 
-    $ninja.RunBuild(paths.size(), (char **)paths.data(), &status);
+    $ninja.start_time_millis_ = GetTimeMillis();
+
+    ok == $ninja.EnsureBuildDirExists() || fatal("failed to create build directory");
+    ok == $ninja.OpenBuildLog() || fatal("failed to open build log");
+    ok == $ninja.OpenDepsLog() || fatal("failed to open deps log");
+
+    if($ninja.RunBuild(paths.size(), (char **)paths.data(), &status) == 0) {
+        $ninja.DumpMetrics();
+    }
+
+    $ninja.build_log_.Close(); $ninja.deps_log_.Close();
 }
 
 void ninja_clean() {
