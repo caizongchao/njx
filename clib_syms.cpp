@@ -26,8 +26,9 @@ extern void ninja_node_lookup();
 extern void ninja_rule_add();
 extern void ninja_rule_lookup();
 extern void ninja_rule_name();
-extern void ninja_rule_get();
-extern void ninja_rule_set();
+extern void ninja_binding_get();
+extern void ninja_binding_set();
+extern void ninja_binding_isreserved();
 extern void ninja_build();
 extern void ninja_clean();
 }
@@ -50,8 +51,9 @@ clib_sym_t clib_syms[] = {
     CLIB_SYM(ninja_rule_add),
     CLIB_SYM(ninja_rule_lookup),
     CLIB_SYM(ninja_rule_name),
-    CLIB_SYM(ninja_rule_get),
-    CLIB_SYM(ninja_rule_set),
+    CLIB_SYM(ninja_binding_get),
+    CLIB_SYM(ninja_binding_set),
+    CLIB_SYM(ninja_binding_isreserved),
     CLIB_SYM(ninja_build),
     CLIB_SYM(ninja_clean),
     {0, 0}};

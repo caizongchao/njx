@@ -18,6 +18,8 @@ namespace fs = std::filesystem;
 
 extern lua_State * __L;
 
+static const char * DEFAULT_BUILD_DIR = "build";
+
 struct NinjaMain : public BuildLogUser {
     /// Command line used to run Ninja.
     const char * ninja_command_;
@@ -83,10 +85,6 @@ static NinjaMain $ninja(nullptr, $config);
 
 static State & $state = $ninja.state_;
 
-__attribute__((constructor)) static void ninja_initialize() {
-    $config.parallelism = GetProcessorCount();
-}
-
 static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path);
 
 extern "C" {
@@ -95,7 +93,7 @@ void ninja_reset() { $state.Reset(); }
 void ninja_dump() { $state.Dump(); }
 const char * ninja_var_get(const char * key) { $buf = $state.bindings_.LookupVariable(key); return $buf.c_str(); }
 void ninja_var_set(const char * key, const char * value) { $state.bindings_.AddBinding(key, value); }
-void ninja_pool_add(void * pool) { $state.AddPool((Pool *)pool); }
+void ninja_pool_add(const char * name, int depth) { $state.AddPool(new Pool(name, depth)); }
 void * ninja_pool_lookup(const char * name) { return $state.LookupPool(name); }
 void * ninja_edge_add(void * rule) { return $state.AddEdge((Rule *)rule); }
 void ninja_edge_addin(void * edge, const char * path, uint64_t slash_bits) { $state.AddIn((Edge *)edge, path, slash_bits); }
@@ -106,11 +104,26 @@ void * ninja_node_lookup(const char * path) { return $state.LookupNode(path); }
 void * ninja_rule_add(const char * name) { auto r = new Rule(name); $state.bindings_.AddRule(r); return r; }
 void * ninja_rule_lookup(const char * name) { return (void *)$state.bindings_.LookupRule(name); }
 const char * ninja_rule_name(void * rule) { return ((Rule *)rule)->name().c_str(); }
-void * ninja_rule_get(void * rule, const char * key) { return (void *)((Rule *)rule)->GetBinding(key); }
-void ninja_rule_set(void * rule, const char * key, const char * value) { EvalString es; ninja_evalstring_read(value, &es, false); ((Rule *)rule)->AddBinding(key, es); }
+void * ninja_binding_get(void * rule, const char * key) { return (void *)((Rule *)rule)->GetBinding(key); }
+void ninja_binding_set(void * rule, const char * key, const char * value) { EvalString es; ninja_evalstring_read(value, &es, false); ((Rule *)rule)->AddBinding(key, es); }
+bool ninja_binding_isreserved(void * rule, const char * key) { return ((Rule *)rule)->IsReservedBinding(key); }
 
 void ninja_test(const char * msg) {
-    printf("%s\n", msg);
+    EvalString es;
+
+    ninja_evalstring_read("link.exe /OUT$out [usual link flags here] @$out.rsp", &es, false);
+
+    for(auto const & [s, t] : es.parsed_) {
+        printf("parsed: %s, %d\n", s.c_str(), t);
+    }
+
+    printf("test done\n");
+}
+
+__attribute__((constructor)) static void ninja_initialize() {
+    $config.parallelism = GetProcessorCount();
+
+    ninja_var_set("builddir", DEFAULT_BUILD_DIR);
 }
 
 void ninja_build(lua_gcptr targets) {
@@ -207,10 +220,7 @@ static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path) 
                 goto yy105;
             }
         yy100:
-            ++p;
-            {
-                fatal("unexpected EOF");
-            }
+            break;
         yy102:
             yych = *++p;
             if(yybm[0 + yych] & 16) {
