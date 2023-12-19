@@ -14,6 +14,8 @@
 
 #include <filesystem>
 
+#include <ftw.h>
+
 namespace fs = std::filesystem;
 
 extern lua_State * __L;
@@ -84,29 +86,11 @@ static BuildConfig $config;
 static NinjaMain $ninja(nullptr, $config);
 
 static State & $state = $ninja.state_;
+static BindingEnv * $env = &$state.bindings_;
 
 static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path);
 
 extern "C" {
-void * ninja_config() { return (void *)&$config; }
-void ninja_reset() { $state.Reset(); }
-void ninja_dump() { $state.Dump(); }
-const char * ninja_var_get(const char * key) { $buf = $state.bindings_.LookupVariable(key); return $buf.c_str(); }
-void ninja_var_set(const char * key, const char * value) { $state.bindings_.AddBinding(key, value); }
-void ninja_pool_add(const char * name, int depth) { $state.AddPool(new Pool(name, depth)); }
-void * ninja_pool_lookup(const char * name) { return $state.LookupPool(name); }
-void * ninja_edge_add(void * rule) { return $state.AddEdge((Rule *)rule); }
-void ninja_edge_addin(void * edge, const char * path, uint64_t slash_bits) { $state.AddIn((Edge *)edge, path, slash_bits); }
-void ninja_edge_addout(void * edge, const char * path, uint64_t slash_bits) { $state.AddOut((Edge *)edge, path, slash_bits, 0); }
-void ninja_edge_addvalidation(void * edge, const char * path, uint64_t slash_bits) { $state.AddValidation((Edge *)edge, path, slash_bits); }
-void * ninja_node_lookup2(const char * path, uint64_t slash_bits) { return $state.GetNode(path, slash_bits); }
-void * ninja_node_lookup(const char * path) { return $state.LookupNode(path); }
-void * ninja_rule_add(const char * name) { auto r = new Rule(name); $state.bindings_.AddRule(r); return r; }
-void * ninja_rule_lookup(const char * name) { return (void *)$state.bindings_.LookupRule(name); }
-const char * ninja_rule_name(void * rule) { return ((Rule *)rule)->name().c_str(); }
-void * ninja_binding_get(void * rule, const char * key) { return (void *)((Rule *)rule)->GetBinding(key); }
-void ninja_binding_set(void * rule, const char * key, const char * value) { EvalString es; ninja_evalstring_read(value, &es, false); ((Rule *)rule)->AddBinding(key, es); }
-bool ninja_binding_isreserved(void * rule, const char * key) { return ((Rule *)rule)->IsReservedBinding(key); }
 
 void ninja_test(const char * msg) {
     EvalString es;
@@ -120,10 +104,213 @@ void ninja_test(const char * msg) {
     printf("test done\n");
 }
 
+void * ninja_config() { return (void *)&$config; }
+
+void ninja_reset() { $state.Reset(); }
+
+void ninja_dump() { $state.Dump(); }
+
+const char * ninja_var_get(const char * key) { $buf = $state.bindings_.LookupVariable(key); return $buf.c_str(); }
+
+void ninja_var_set(const char * key, const char * value) { $state.bindings_.AddBinding(key, value); }
+
 __attribute__((constructor)) static void ninja_initialize() {
     $config.parallelism = GetProcessorCount();
 
     ninja_var_set("builddir", DEFAULT_BUILD_DIR);
+}
+
+void ninja_pool_add(const char * name, int depth) {
+    ($state.LookupPool(name) != nullptr) || fatal("duplicate pool '%s'", name);
+    (depth >= 0) || fatal("invalid pool depth %d", depth);
+
+    $state.AddPool(new Pool(name, depth));
+}
+
+void * ninja_rule_add(const char * name, lua_table vars) {
+    ($env->LookupRuleCurrentScope(name) == nullptr) || fatal("duplicate rule '%s'", name);
+
+    auto r = new Rule(name);
+
+    vars.for_pairs([&](lua_value const & k, lua_value const & v) {
+        if(k.is_string() && v.is_string()) {
+            Rule::IsReservedBinding(k.c_str()) || fatal("unexpected variable '%s'", k.c_str());
+
+            EvalString es; {
+                ninja_evalstring_read(v.c_str(), &es, false);
+            }
+
+            r->AddBinding(k.c_str(), es);
+        }
+    });
+
+    $state.bindings_.AddRule(r); return r;
+}
+
+std::string ninja_path_read(BindingEnv * env, const char * s, uint64_t * slash_bits = 0) {
+    EvalString es; ninja_evalstring_read(s, &es, true);
+
+    std::string path = es.Evaluate(env); if(path.empty()) {
+        fatal("empty path");
+    }
+
+    uint64_t bits;
+
+    CanonicalizePath(&path, slash_bits ? slash_bits : &bits);
+
+    return path;
+}
+
+void ninja_edge_add(lua_gcptr outputs, const char * rule_name, lua_gcptr inputs, lua_table vars) {
+    (rule_name != nullptr) || fatal("missing rule name");
+
+    const Rule * rule = $env->LookupRule(rule_name); {
+        (rule != nullptr) || fatal("unknown rule '%s'", rule_name);
+    }
+
+    BindingEnv * env = vars.empty() ? $env : new BindingEnv($env); if(!vars.empty()) {
+        vars.for_pairs([&](lua_value const & k, lua_value const & v) {
+            if(k.is_string() && v.is_string()) {
+                env->AddBinding(k.c_str(), v.c_str());
+            }
+        });
+    }
+
+    Edge * edge = $state.AddEdge(rule); edge->env_ = env;
+
+    std::string pool_name = edge->GetBinding("pool"); if(!pool_name.empty()) {
+        Pool * pool = $state.LookupPool(pool_name); {
+            (pool != nullptr) || fatal("unknown pool name '%s'", pool_name.c_str());
+        }
+
+        edge->pool_ = pool;
+    }
+
+    std::string err; int c;
+
+    // outputs
+    outputs.for_ipairs([&](int, lua_value const & v) {
+        if(v.is_string()) {
+            uint64_t slash_bits;
+            std::string path = ninja_path_read(edge->env_, v.c_str(), &slash_bits);
+            $state.AddOut(edge, path, slash_bits, &err) || fatal("%s", err.c_str());
+        }
+    });
+
+    lua_value implicit_outs; if(outputs.is_table()) {
+        implicit_outs = outputs.as_table()["implicit"];
+    }
+
+    c = 0; if(implicit_outs && implicit_outs.is_gcobj()) {
+        implicit_outs.to_gcptr().for_ipairs([&](int, lua_value const & v) {
+            if(v.is_string()) {
+                uint64_t slash_bits;
+                std::string path = ninja_path_read(edge->env_, v.c_str(), &slash_bits);
+                $state.AddOut(edge, path, slash_bits, &err) || fatal("%s", err.c_str());
+                ++c;
+            }
+        });
+    }
+
+    !edge->outputs_.empty() || fatal("build does not have any outputs");
+
+    edge->implicit_outs_ = c;
+
+    // inputs
+    inputs.for_ipairs([&](int, lua_value const & v) {
+        if(v.is_string()) {
+            uint64_t slash_bits;
+            std::string path = ninja_path_read(edge->env_, v.c_str(), &slash_bits);
+            $state.AddIn(edge, path, slash_bits);
+        }
+    });
+
+    !edge->inputs_.empty() || fatal("build does not have any inputs");
+
+    lua_value implicit_ins; if(inputs.is_table()) {
+        implicit_ins = inputs.as_table()["implicit"];
+    }
+
+    c = 0; if(implicit_ins && implicit_ins.is_gcobj()) {
+        implicit_ins.to_gcptr().for_ipairs([&](int, lua_value const & v) {
+            if(v.is_string()) {
+                uint64_t slash_bits;
+                std::string path = ninja_path_read(edge->env_, v.c_str(), &slash_bits);
+                $state.AddIn(edge, path, slash_bits);
+                ++c;
+            }
+        });
+    }
+
+    edge->implicit_deps_ = c;
+
+    lua_value order_only; if(inputs.is_table()) {
+        order_only = inputs.as_table()["order_only"];
+    }
+
+    c = 0; if(order_only && order_only.is_gcobj()) {
+        order_only.to_gcptr().for_ipairs([&](int, lua_value const & v) {
+            if(v.is_string()) {
+                uint64_t slash_bits;
+                std::string path = ninja_path_read(edge->env_, v.c_str(), &slash_bits);
+                $state.AddIn(edge, path, slash_bits);
+                ++c;
+            }
+        });
+    }
+
+    edge->order_only_deps_ = c;
+
+    lua_value validations; if(inputs.is_table()) {
+        validations = inputs.as_table()["validations"];
+    }
+
+    if(validations && validations.is_gcobj()) {
+        validations.to_gcptr().for_ipairs([&](int, lua_value const & v) {
+            if(v.is_string()) {
+                uint64_t slash_bits;
+                std::string path = ninja_path_read(edge->env_, v.c_str(), &slash_bits);
+                $state.AddValidation(edge, path, slash_bits);
+                ++c;
+            }
+        });
+    }
+
+    // phony cycle check
+    {
+        auto x = edge->outputs_[0];
+        (std::find(edge->inputs_.begin(), edge->inputs_.end(), x) != edge->inputs_.end()) || fatal("phony target '%s' names itself as an input; ", x->path().c_str());
+    }
+
+    // dyndep
+    {
+        std::string dyndep = edge->GetUnescapedDyndep(); if(!dyndep.empty()) {
+            uint64_t slash_bits;
+            CanonicalizePath(&dyndep, &slash_bits);
+            edge->dyndep_ = $state.GetNode(dyndep, slash_bits);
+            edge->dyndep_->set_dyndep_pending(true);
+
+            (std::find(edge->inputs_.begin(), edge->inputs_.end(), edge->dyndep_) != edge->inputs_.end()) || fatal("dyndep '%s' is not an input", dyndep.c_str());
+            (!edge->dyndep_->generated_by_dep_loader()) || fatal("dyndep '%s' is already an output", dyndep.c_str());
+        }
+    }
+}
+
+void ninja_default_add(lua_gcptr defaults) {
+    std::string e;
+
+    if(defaults.is_string()) {
+        ok == $state.AddDefault(ninja_path_read($env, defaults.as_string().c_str()), &e) || fatal("%s", e.c_str());
+    }
+    else if(defaults.is_table()) {
+        lua_table const & t = defaults.as_table();
+
+        t.for_ipairs([&](int, lua_value const & v) {
+            if(v.is_string()) {
+                ok == $state.AddDefault(ninja_path_read($env, v.c_str()), &e) || fatal("%s", e.c_str());
+            }
+        });
+    }
 }
 
 void ninja_build(lua_gcptr targets) {

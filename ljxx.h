@@ -28,6 +28,7 @@ struct tvalue {
 };
 
 struct lua_table;
+struct lua_gcptr;
 
 struct lua_value {
     TValue value {(uint64_t)-1};
@@ -47,8 +48,10 @@ struct lua_value {
     lua_value(double x) { setnumV(&value, x); }
 
     lua_value(int32_t x) { setnumV(&value, x); }
+    lua_value(uint32_t x) { setnumV(&value, x); }
 
     lua_value(int64_t x) { setnumV(&value, x); }
+    lua_value(uint64_t x) { setnumV(&value, x); }
 
     lua_value(const char *);
 
@@ -98,6 +101,7 @@ struct lua_value {
     bool is_lightud() const { return tvislightud(&value); }
     bool is_function() const { return tvisfunc(&value); }
     bool is_boolean() const { return tvisbool(&value); }
+    bool is_gcobj() const { return tvisgcv(&value); }
 
     int32_t to_int(int32_t defvalue = 0) const { return tvisnum(&value) ? numV(&value) : defvalue; }
     int32_t to_int32(int32_t defvalue = 0) const { return tvisnum(&value) ? numV(&value) : defvalue; }
@@ -105,6 +109,8 @@ struct lua_value {
     double to_double(double defvalue = 0) const { return tvisnum(&value) ? numV(&value) : defvalue; }
     std::string_view to_string(std::string_view defvalue = {}) const { return tvisstr(&value) ? std::string_view(strVdata(&value), strV(&value)->len) : defvalue; }
     const char * to_cstr(const char * defvalue = nullptr) const { return tvisstr(&value) ? strVdata(&value) : defvalue; }
+
+    lua_gcptr to_gcptr() const;
 
     const char * c_str() const { return strVdata(&value); }
 };
@@ -134,6 +140,8 @@ struct lua_table {
 
     operator bool() const { return value != nullptr; }
 
+    bool empty() const { return !value || (lj_tab_len(value) == 0); }
+
     lua_table & operator=(lua_table const & x) { value = x.value; return *this; }
 
     lua_table & operator=(GCtab * x) { value = x; return *this; }
@@ -153,6 +161,8 @@ struct lua_table {
     lua_value operator()(const char * name) const { return operator()(std::string_view(name)); }
 
     lua_table & push(lua_value const & x);
+    
+    lua_table & push_back(lua_value const & x) { return push(x); }
 
     lua_table & def(size_t idx, lua_value const & x);
 
@@ -274,7 +284,23 @@ struct lua_gcptr {
 
     lua_table & as_table() const { return *(lua_table *)this; }
     lua_string & as_string() const { return *(lua_string *)this; }
+
+    lua_value tvalue() const { uint64_t r = (uint64_t)value; r |= (((uint64_t) ~(value->gch.gct)) << 47); return {r}; }
+
+    operator lua_value() const { return tvalue(); }
+
+    template<typename F>
+    void for_pairs(F && f) const {
+        if(!is_table()) f(lua_value(1), tvalue()); else as_table().for_pairs(std::forward<F>(f));
+    }
+
+    template<typename F>
+    void for_ipairs(F && f) const {
+        if(!is_table()) f(1, tvalue()); else as_table().for_ipairs(std::forward<F>(f));
+    }
 };
+
+inline lua_gcptr lua_value::to_gcptr() const { return {gcval(&value)}; }
 
 struct lua_state;
 
