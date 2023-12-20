@@ -2,6 +2,20 @@
 
 #include <utility>
 
+template<typename F>
+struct arity_of;
+template<typename F>
+struct arity_of : arity_of<decltype(&F::operator())> {};
+template<typename R, typename... Args>
+struct arity_of<R (*)(Args...)> : std::integral_constant<unsigned, sizeof...(Args)> {};
+template<typename R, typename C, typename... Args>
+struct arity_of<R (C::*)(Args...)> : std::integral_constant<unsigned, sizeof...(Args)> {};
+template<typename R, typename C, typename... Args>
+struct arity_of<R (C::*)(Args...) const> : std::integral_constant<unsigned, sizeof...(Args)> {};
+
+template<typename F>
+using arity_of_v = arity_of<F>::value;
+
 template<typename...>
 using of_void = void;
 
@@ -41,7 +55,7 @@ struct function_traits<R(A...)> {
 };
 
 template<typename F>
-struct function_traits : public function_traits<decltype(&std::remove_reference<F>::type::operator())> {};
+struct function_traits : public function_traits<decltype(&F::operator())> {};
 template<typename C, typename R, typename... A>
 struct function_traits<R (C::*)(A...) const> : function_traits<R(A...)> {};
 template<typename C, typename R, typename... A>
@@ -99,8 +113,8 @@ struct function<R(Args...)> {
     static auto basic_fx_invoker(void * f, Xs... xs) {
         typedef function_traits<F> fx_traits;
 
-        const size_t fx_size = sizeof(F);
-        const bool no_return = std::is_void_v<typename fx_traits::result>;
+        constexpr size_t fx_size = sizeof(F);
+        constexpr bool no_return = std::is_void_v<typename fx_traits::result>;
 
         F * pfx = 0; if(fx_size > 1) {
             if constexpr(fx_size <= sizeof(uintptr_t)) pfx = (F *)f; else pfx = (F *)*(uintptr_t *)f;
@@ -113,8 +127,8 @@ struct function<R(Args...)> {
     static void basic_fx_dtor(void * fx) {
         typedef function_traits<F> fx_traits;
 
-        const size_t fx_size = sizeof(F);
-        const bool is_trivial = std::is_trivially_destructible_v<F>;
+        constexpr size_t fx_size = sizeof(F);
+        constexpr bool is_trivial = std::is_trivially_destructible_v<F>;
 
         if constexpr(!is_trivial) {
             if constexpr(fx_size <= sizeof(uintptr_t)) ((F *)fx)->~F(); else delete(F *)*(uintptr_t *)fx;

@@ -48,6 +48,14 @@ struct autofd {
     int detach() { auto fd = this->fd; this->fd = -1; return fd; }
 };
 
+static inline bool file_exists(const char * fname) {
+    autofd fd(open(fname, O_RDONLY)); {
+        if(fd == -1) return false;
+    }
+
+    return true;
+}
+
 struct mfile {
     char * data {nullptr}; size_t size {0};
 

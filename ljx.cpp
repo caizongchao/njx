@@ -2,13 +2,6 @@
 #include "ljxx.h"
 #include "ioxx.h"
 
-template<typename F>
-bool foo(F && f) {
-    typedef function_traits<F> fx_traits;
-
-    return std::is_void_v<typename fx_traits::result>;
-}
-
 int main(int argc, char ** argv) {
     $L([&]() {
         lua_table package = $L["package"]; {

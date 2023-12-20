@@ -174,7 +174,7 @@ var luajit_src = [
     "deps/luajit/src/lib_ffi.c",
     "deps/luajit/src/lib_buffer.c",
     "deps/luajit/src/lib_init.c",
-    "deps/luajit/src/luajit.c",
+    // "deps/luajit/src/luajit.c",
 ];
 
 var luajit_build_dir = 'build/luajit/'; {
@@ -222,6 +222,7 @@ var ljx_src = [
     "clib_syms.cpp",
     "ninja_api.cpp",
     "unwind.cpp",
+    "ljx.cpp"
 ]
 
 var libljx_build_dir = 'build/ljx/'; {

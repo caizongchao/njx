@@ -2,6 +2,10 @@
 #define __ljx_326793b9ae35409dad7f48b241b79c8f
 
 #include <stdint.h>
+#include <stdarg.h>
+#include <stdlib.h>
+
+#include <utility>
 
 const int success = 0;
 
