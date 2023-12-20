@@ -1,4 +1,8 @@
-local ffi = require('ffi'); _G.ffi = ffi
+local ffi = require('ffi')
+local C = ffi
+
+_G.ffi = ffi
+_G.C = C
 
 local function stacktrace(...)
     local msg; if select('#', ...) > 0 then
@@ -188,23 +192,22 @@ ffi.cdef [[
     DWORD GetFileAttributesW(LPCWSTR lpFileName);
 
     int CompareStringW(DWORD Locale, DWORD dwCmpFlags, LPWSTR lpString1, int cchCount1, LPWSTR lpString2, int cchCount2);
-
-    int MessageBoxA(void* hWnd, LPCSTR lpText, LPCSTR lpCaption, UINT uType);
-    int MessageBoxW(void* hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT uType);
 ]]
+
+local kernel32 = ffi.load('kernel32')
 
 local __wstr = ffi.new('WCHAR[?]', 16 * 1024)
 local __str = ffi.new('char[?]', 16 * 1024)
 
 local function u82w(str)
-    local len = C.MultiByteToWideChar(65001, 0, str, -1, nil, 0)
-    C.MultiByteToWideChar(65001, 0, str, -1, __wstr, len)
+    local len = kernel32.MultiByteToWideChar(65001, 0, str, -1, nil, 0)
+    kernel32.MultiByteToWideChar(65001, 0, str, -1, __wstr, len)
     return __wstr
 end
 
 local function w2u8(wstr)
-    local len = C.WideCharToMultiByte(65001, 0, wstr, -1, nil, 0, nil, nil)
-    C.WideCharToMultiByte(65001, 0, wstr, -1, __str, len, nil, nil)
+    local len = kernel32.WideCharToMultiByte(65001, 0, wstr, -1, nil, 0, nil, nil)
+    kernel32.WideCharToMultiByte(65001, 0, wstr, -1, __str, len, nil, nil)
     return ffi.string(__str)
 end
 
@@ -319,7 +322,7 @@ local function path_combine(path1, path2, ...)
 end
 
 local function path_ftype(path)
-    local attrs = C.GetFileAttributesW(u82w(path))
+    local attrs = kernel32.GetFileAttributesW(u82w(path))
     if attrs ~= 0xFFFFFFFF then
         if bit.band(attrs, 0x10) ~= 0 then
             return 'directory'
@@ -373,7 +376,7 @@ local function directory_walk(path, opts)
 
     local stack = { path }; while #stack > 0 do
         local dir = stack[#stack]; stack[#stack] = nil
-        local handle = C.FindFirstFileW(u82w(path_combine(dir, wildcard)), find_dataw)
+        local handle = kernel32.FindFirstFileW(u82w(path_combine(dir, wildcard)), find_dataw)
         if handle ~= INVALID_HANDLE_VALUE then
             repeat
                 local filename = w2u8(find_dataw[0].cFileName)
@@ -403,8 +406,8 @@ local function directory_walk(path, opts)
 
                     ::next::
                 end
-            until C.FindNextFileW(handle, find_dataw) == 0
-            C.FindClose(handle)
+            until kernel32.FindNextFileW(handle, find_dataw) == 0
+            kernel32.FindClose(handle)
         end
     end
 end

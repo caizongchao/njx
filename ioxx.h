@@ -79,6 +79,8 @@ struct mfile {
 
     operator char *() const { return (char *)data; }
 
+    operator std::string_view() const { return std::string_view(data, size); }
+
     // F: int(char * start, char * end)
     template<typename F>
     void each_line(F && f) {
@@ -115,10 +117,10 @@ struct afile {
         struct stat st; fstat(fd, &st); return st.st_size;
     }
 
-    std::string read(size_t toread) {
+    std::string read(size_t toread = -1) {
         std::string s;
 
-        s.resize(toread);
+        s.resize(toread = std::min(toread, size()));
 
         ::read(fd, (char *)s.c_str(), toread);
 
