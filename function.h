@@ -83,9 +83,15 @@ struct function<R(Args...)> {
 
     fx_dtor_type fx_dtor {0}; fx_invoker_type fx_invoker {0}; uintptr_t fx {0};
 
+    ~function() { if(fx_dtor) ((fx_dtor_type)(uintptr_t)fx_dtor)(&fx); }
+
     function() = default;
 
-    ~function() { if(fx_dtor) ((fx_dtor_type)(uintptr_t)fx_dtor)(&fx); }
+    function(function const &) = delete;
+
+    function(function && f) : fx_dtor(f.fx_dtor), fx_invoker(f.fx_invoker), fx(f.fx) {
+        f.fx_dtor = 0;
+    }
 
     template<typename F>
     function(F && f) {
