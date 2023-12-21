@@ -90,6 +90,8 @@ static BindingEnv * $env = &$state.bindings_;
 
 static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path);
 
+extern int GuessParallelism();
+
 extern "C" {
 
 void ninja_test(const char * msg) {
@@ -104,7 +106,11 @@ void ninja_test(const char * msg) {
     printf("test done\n");
 }
 
-void * ninja_config() { return (void *)&$config; }
+void * ninja_config_get() { return (void *)&$config; }
+
+void ninja_config_apply() {
+    if($config.parallelism == 0) $config.parallelism = GuessParallelism();
+}
 
 void ninja_reset() { $state.Reset(); }
 

@@ -280,7 +280,7 @@ async function make_ljx() {
         let r = await run('cosmoc++ -Wl,--start-group -L build lj_vm.o -lluajit -lljx -lninja -Wl,--end-group -o ' + ljx_build_dir + 'ljx.exe');
 
         if(r) {
-            await run('zip bin/ljx.exe ljx.lua')
+            await run('zip bin/ljx.exe ljx.lua ninja.lua')
         }
     }
 }

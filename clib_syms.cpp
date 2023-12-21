@@ -10,7 +10,8 @@ struct clib_sym_t {
 extern "C" {
 extern void ninja_test();
 
-extern void ninja_config();
+extern void ninja_config_get();
+extern void ninja_config_apply();
 extern void ninja_reset();
 extern void ninja_dump();
 extern void ninja_var_get();
@@ -25,7 +26,8 @@ extern void ninja_clean();
 
 clib_sym_t clib_syms[] = {
     CLIB_SYM(ninja_test),
-    CLIB_SYM(ninja_config),
+    CLIB_SYM(ninja_config_get),
+    CLIB_SYM(ninja_config_apply),
     CLIB_SYM(ninja_reset),
     CLIB_SYM(ninja_dump),
     CLIB_SYM(ninja_var_get),

@@ -1,8 +1,18 @@
 local ffi = require('ffi')
 local C = ffi
 
-_G.ffi = ffi
-_G.C = C
+_G.ffi = ffi; _G.C = C
+
+local function object(x)
+    x = x or {}; x.__index = x;
+    
+    
+    return x
+end; _G.object = object
+
+local function extends(base, x)
+    x = x or {}; setmetatable(x, base); return x
+end; _G.extends = extends
 
 local function stacktrace(...)
     local msg; if select('#', ...) > 0 then
