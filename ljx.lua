@@ -3,15 +3,29 @@ local C = ffi
 
 _G.ffi = ffi; _G.C = C
 
+local __mixin = '__mixin'
+
 local function object(x)
-    x = x or {}; x.__index = x;
-    
-    
-    return x
+    x = x or {}; x.__index = function (self, key)
+        local mx = rawget(self, __mixin); if mx then
+            for _, m in ipairs(mx) do
+                local v = m[key]; if v then
+                    self[key] = v; return v
+                end
+            end
+        end
+        return nil
+    end;
+    setmetatable(x, x); return x
 end; _G.object = object
 
 local function extends(base, x)
-    x = x or {}; setmetatable(x, base); return x
+    x = x or object({})
+    local m = rawget(x, __mixin); if not m then
+        m = {}; rawset(x, __mixin, m)
+    end
+    table.insert(m, base)
+    return x
 end; _G.extends = extends
 
 local function stacktrace(...)
