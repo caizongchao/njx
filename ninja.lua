@@ -31,8 +31,7 @@ ffi.cdef [[
 
 local ninja = {}; _G.ninja = ninja
 
-ninja.targets = {}
-ninja.toolchains = {}
+ninja.targets = {}; ninja.toolchains = {}
 
 function ninja.config(fx)
     if fx(C.ninja_config()) ~= false then C.ninja_config_apply() end
@@ -50,85 +49,129 @@ end
 
 local basic_cc_toolchain; basic_cc_toolchain = object({
     target = {
-        new = function (name, type, opts)
-            local target = extends(basic_cc_toolchain, {
+        new = function(name, type, opts)
+            local target = inherits(basic_cc_toolchain.target.basic, {
                 name = name, type = type, opts = opts or {},
             })
             ninja.targets[name] = target
             return target
-        end
+        end,
+
+        basic = {
+            deps = function(self, xs)
+                local deps = ensure_field(self.opts, 'deps', {})
+                for _, x in ipairs(as_list(xs)) do table.insert(deps, x) end
+                return self
+            end,
+
+            src = function(self, src)
+                local srcs = ensure_field(self.opts, 'srcs', {})
+                for _, s in ipairs(as_list(src)) do table.insert(srcs, s) end
+                return self
+            end,
+
+            include_dir = function(self, dir)
+                local dirs = ensure_field(self.opts, 'include_dirs', {})
+                for _, d in ipairs(as_list(dir)) do table.insert(dirs, d) end
+                return self
+            end,
+
+            include = function(self, inc)
+                local incs = ensure_field(self.opts, 'includes', {})
+                for _, i in ipairs(as_list(inc)) do table.insert(incs, i) end
+                return self
+            end,
+
+            lib_dir = function(self, dir)
+                local dirs = ensure_field(self.opts, 'lib_dirs', {})
+                for _, d in ipairs(as_list(dir)) do table.insert(dirs, d) end
+                return self
+            end,
+
+            lib = function(self, lib)
+                local libs = ensure_field(self.opts, 'libs', {})
+                for _, l in ipairs(as_list(lib)) do table.insert(libs, l) end
+                return self
+            end,
+
+            define = function(self, def)
+                local defs = ensure_field(self.opts, 'defines', {})
+                for _, d in ipairs(as_list(def)) do table.insert(defs, d) end
+                return self
+            end,
+
+            c_flags = function(self, flags)
+                local xs = ensure_field(self.opts, 'c_flags', {})
+                for _, f in ipairs(as_list(flags)) do table.insert(xs, f) end
+                return self
+            end,
+
+            cc_flags = function(self, flags)
+                local xs = ensure_field(self.opts, 'cc_flags', {})
+                for _, f in ipairs(as_list(flags)) do table.insert(xs, f) end
+                return self
+            end,
+
+            cxx_flags = function(self, flags)
+                local xs = ensure_field(self.opts, 'cxx_flags', {})
+                for _, f in ipairs(as_list(flags)) do table.insert(xs, f) end
+                return self
+            end,
+
+            ld_flags = function(self, flags)
+                local xs = ensure_field(self.opts, 'ld_flags', {})
+                for _, f in ipairs(as_list(flags)) do table.insert(xs, f) end
+                return self
+            end,
+        }
     },
-
-    src = function(self, src)
-        local srcs = ensure_field(self.opts, 'srcs', {})
-        for _, s in ipairs(as_list(src)) do table.insert(srcs, s) end
-        return self
-    end,
-
-    include_dir = function(self, dir)
-        local dirs = ensure_field(self.opts, 'include_dirs', {})
-        for _, d in ipairs(as_list(dir)) do table.insert(dirs, d) end
-        return self
-    end,
-
-    include = function(self, inc)
-        local incs = ensure_field(self.opts, 'includes', {})
-        for _, i in ipairs(as_list(inc)) do table.insert(incs, i) end
-        return self
-    end,
-
-    lib_dir = function(self, dir)
-        local dirs = ensure_field(self.opts, 'lib_dirs', {})
-        for _, d in ipairs(as_list(dir)) do table.insert(dirs, d) end
-        return self
-    end,
-
-    lib = function(self, lib)
-        local libs = ensure_field(self.opts, 'libs', {})
-        for _, l in ipairs(as_list(lib)) do table.insert(libs, l) end
-        return self
-    end,
-
-    define = function(self, def)
-        local defs = ensure_field(self.opts, 'defines', {})
-        for _, d in ipairs(as_list(def)) do table.insert(defs, d) end
-        return self
-    end,
-
-    c_flags = function(self, flags)
-        local xs = ensure_field(self.opts, 'c_flags', {})
-        for _, f in ipairs(as_list(flags)) do table.insert(xs, f) end
-        return self
-    end,
-
-    cc_flags = function(self, flags)
-        local xs = ensure_field(self.opts, 'cc_flags', {})
-        for _, f in ipairs(as_list(flags)) do table.insert(xs, f) end
-        return self
-    end,
-
-    cxx_flags = function(self, flags)
-        local xs = ensure_field(self.opts, 'cxx_flags', {})
-        for _, f in ipairs(as_list(flags)) do table.insert(xs, f) end
-        return self
-    end,
-
-    ld_flags = function(self, flags)
-        local xs = ensure_field(self.opts, 'ld_flags', {})
-        for _, f in ipairs(as_list(flags)) do table.insert(xs, f) end
-        return self
-    end,
 });
 
-local toolchain_cosmocc = {
-}
+local gcc_toolchain; gcc_toolchain = object({
+    target = {
+        new = function(...)
+            return extends(basic_cc_toolchain.target.new(...), gcc_toolchain.target.basic)
+        end,
 
-function ninja.target(name, type, opts)
-    local target = extends(basic_target, {
-        name = name, type = type, opts = opts or {},
-    })
+        basic = {
+        },
+    },
+}); ninja.toolchains.gcc = gcc_toolchain
 
-    ninja.targets[name] = target
+local cosmocc_toolchain; cosmocc_toolchain = object({
+    target = {
+        new = function(...)
+            return extends(basic_cc_toolchain.target.new(...), cosmocc_toolchain.target.basic)
+        end,
 
-    return target
+        basic = {
+        },
+    },
+}); ninja.toolchains.cosmocc = cosmocc_toolchain
+
+local clang_toolchain; clang_toolchain = object({
+    target = {
+        new = function(...)
+            return extends(basic_cc_toolchain.target.new(...), clang_toolchain.target.basic)
+        end,
+
+        basic = {
+        },
+    },
+}); ninja.toolchains.clang = clang_toolchain
+
+local msvc_toolchain; msvc_toolchain = object({
+    target = {
+        new = function(...)
+            return extends(basic_cc_toolchain.target.new(...), msvc_toolchain.target.basic)
+        end,
+
+        basic = {
+        },
+    },
+}); ninja.toolchains.msvc = msvc_toolchain
+
+function ninja.target(toolchain, name, type, opts)
+    return ninja[toolchain].target.new(name, type, opts)
 end
+

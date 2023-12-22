@@ -161,7 +161,7 @@ struct lua_table {
     lua_value operator()(const char * name) const { return operator()(std::string_view(name)); }
 
     lua_table & push(lua_value const & x);
-    
+
     lua_table & push_back(lua_value const & x) { return push(x); }
 
     lua_table & def(size_t idx, lua_value const & x);
@@ -227,6 +227,30 @@ struct lua_table {
         }
     }
 };
+
+// struct lua_reftable {
+//     lua_table table; int size; int capacity; int flist;
+
+//     lua_reftable(size_t capacity = 0)
+//         : table(lua_table::make(capacity, 0)), size(0), capacity(capacity), flist(-1) {}
+
+//     lua_value * data() const { return mref(table.value->array, lua_value); }
+
+//     int ref(lua_value x) {
+//         auto xs = this->data(); if(flist < 0) {
+//             xs[++this->size] = x; return this->size;
+//         }
+//         else {
+//             int r = flist; flist = (int &)(xs[flist]); xs[r] = x; return r;
+//         }
+//     }
+
+//     void unref(int i) {
+//         auto xs = this->data(); ((int &)(xs[i])) = flist; flist = i;
+//     }
+
+//     lua_value operator[](int i) const { return this->data()[i]; }
+// };
 
 struct lua_string {
     GCstr * value {nullptr};
@@ -340,14 +364,6 @@ struct lua_state {
 
     // registry
     lua_table & _R() const { static auto x = lua_table::make(1024, 0); return x; }
-
-    // argumengs
-    lua_table & arguments() const { static auto x = lua_table::make(32, 0); return x; }
-
-    lua_value * argv() const { return mref(arguments().value->array, lua_value); }
-
-    template<size_t N>
-    std::array<lua_value, N> args() const { return {argv(), argv() + N}; }
 
     lua_value operator[](std::string_view const & name) const { return _G()[name]; }
 

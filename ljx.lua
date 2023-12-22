@@ -19,13 +19,17 @@ local function object(x)
     setmetatable(x, x); return x
 end; _G.object = object
 
-local function extends(base, x)
-    x = x or object({})
+local function inherits(base, x)
+    x = (x and x.__index) and x or object(x)
     local m = rawget(x, __mixin); if not m then
         m = {}; rawset(x, __mixin, m)
     end
-    table.insert(m, base)
+    table.insert(m, 1, base)
     return x
+end; _G.inherits = inherits
+
+local function extends(o, x)
+    return inherits(x, o)
 end; _G.extends = extends
 
 local function stacktrace(...)
@@ -173,6 +177,12 @@ local function inspect(o, indent)
         return tostring(o)
     end
 end; _G.inspect = inspect
+
+local function trace(...)
+    local c = select('#', ...); for i = 1, c do
+        local v = select(i, ...); print(inspect(v))
+    end
+end; _G.trace = trace
 
 ffi.cdef [[
     typedef void* HANDLE;
