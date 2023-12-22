@@ -19,6 +19,7 @@ extern "C" {
 #undef Node
 }
 
+#include "ljx.h"
 #include "function.h"
 
 struct tvalue {
@@ -227,30 +228,6 @@ struct lua_table {
         }
     }
 };
-
-// struct lua_reftable {
-//     lua_table table; int size; int capacity; int flist;
-
-//     lua_reftable(size_t capacity = 0)
-//         : table(lua_table::make(capacity, 0)), size(0), capacity(capacity), flist(-1) {}
-
-//     lua_value * data() const { return mref(table.value->array, lua_value); }
-
-//     int ref(lua_value x) {
-//         auto xs = this->data(); if(flist < 0) {
-//             xs[++this->size] = x; return this->size;
-//         }
-//         else {
-//             int r = flist; flist = (int &)(xs[flist]); xs[r] = x; return r;
-//         }
-//     }
-
-//     void unref(int i) {
-//         auto xs = this->data(); ((int &)(xs[i])) = flist; flist = i;
-//     }
-
-//     lua_value operator[](int i) const { return this->data()[i]; }
-// };
 
 struct lua_string {
     GCstr * value {nullptr};
