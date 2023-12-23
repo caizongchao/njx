@@ -18,7 +18,45 @@
 
 namespace fs = std::filesystem;
 
-extern lua_State * __L;
+struct reftable {
+    static constexpr uint32_t NOFREE_REF = (uint32_t)-1;
+
+    uint32_t size; uint32_t flist; lua_value table[0];
+
+    static reftable * from(lua_table t) { return (reftable *)t.array(); }
+
+    int ref(lua_value const & x) {
+        int r; if(flist == NOFREE_REF) {
+            r = size; table[size++] = x;
+        }
+        else {
+            r = flist; flist = (uintptr_t &)(table[flist]); table[r] = x;
+        }
+        return r + 1;
+    }
+
+    void unref(uint32_t i) {
+        --i; ((uintptr_t &)(table[i])) = flist; flist = i;
+    }
+
+    lua_value & operator[](uint32_t i) const { return (lua_value &)table[i - 1]; }
+};
+
+lua_gcptr reftable_new(uint32_t size) {
+    auto t = lua_table::make(size, 0);
+    
+    auto rtab = reftable::from(t); rtab->size = 0; rtab->flist = reftable::NOFREE_REF;
+    
+    return {t.value};
+}
+
+int reftable_ref(lua_table t, lua_gcptr x) {
+    auto rtab = reftable::from(t); return rtab->ref(x.tvalue());
+}
+
+void reftable_unref(lua_table t, int r) {
+    auto rtab = reftable::from(t); return rtab->unref(r);
+}
 
 static const char * DEFAULT_BUILD_DIR = "build";
 
@@ -95,14 +133,6 @@ extern int GuessParallelism();
 extern "C" {
 
 void ninja_test(const char * msg) {
-    EvalString es;
-
-    ninja_evalstring_read("link.exe /OUT$out [usual link flags here] @$out.rsp", &es, false);
-
-    for(auto const & [s, t] : es.parsed_) {
-        printf("parsed: %s, %d\n", s.c_str(), t);
-    }
-
     printf("test done\n");
 }
 
@@ -119,12 +149,6 @@ void ninja_dump() { $state.Dump(); }
 const char * ninja_var_get(const char * key) { $buf = $state.bindings_.LookupVariable(key); return $buf.c_str(); }
 
 void ninja_var_set(const char * key, const char * value) { $state.bindings_.AddBinding(key, value); }
-
-__attribute__((constructor)) static void ninja_initialize() {
-    $config.parallelism = GetProcessorCount();
-
-    ninja_var_set("builddir", DEFAULT_BUILD_DIR);
-}
 
 void ninja_pool_add(const char * name, int depth) {
     ($state.LookupPool(name) != nullptr) || fatal("duplicate pool '%s'", name);
@@ -549,4 +573,45 @@ static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path) 
     // if(path) EatWhitespace();
     // Non-path strings end in newlines, so there's no whitespace to eat.
     return true;
+}
+
+struct clib_sym_t {
+    const char * name; void * sym;
+};
+
+#define CLIB_SYM(name) { #name, (void *)(name) }
+
+static clib_sym_t __clib_syms[] = {
+    CLIB_SYM(reftable_new),
+    CLIB_SYM(reftable_ref),
+    CLIB_SYM(reftable_unref),
+    CLIB_SYM(ninja_config_get),
+    CLIB_SYM(ninja_config_apply),
+    CLIB_SYM(ninja_reset),
+    CLIB_SYM(ninja_dump),
+    CLIB_SYM(ninja_var_get),
+    CLIB_SYM(ninja_var_set),
+    CLIB_SYM(ninja_pool_add),
+    CLIB_SYM(ninja_edge_add),
+    CLIB_SYM(ninja_rule_add),
+    CLIB_SYM(ninja_default_add),
+    CLIB_SYM(ninja_build),
+    CLIB_SYM(ninja_clean),
+    {0, 0}};
+
+extern "C" {
+extern clib_sym_t * clib_syms;
+
+static void clib_init() {
+    printf("clib_syms init\n");
+    clib_syms = __clib_syms;
+}
+
+__attribute__((constructor)) void ninja_initialize() {
+    printf("ninja init\n");
+    clib_init();
+
+    $config.parallelism = GetProcessorCount();
+    ninja_var_set("builddir", DEFAULT_BUILD_DIR);
+}
 }

@@ -219,7 +219,6 @@ async function make_libluajit() {
 }
 
 var ljx_src = [
-    "clib_syms.cpp",
     "ninja_api.cpp",
     "unwind.cpp",
     "ljx.cpp"
@@ -277,7 +276,7 @@ async function make_ljx() {
     if (b1 || b2 || b3) {
         console.log('linking ljx.exe');
         
-        let r = await run('cosmoc++ -Wl,--start-group -L build lj_vm.o -lluajit -lljx -lninja -Wl,--end-group -o ' + ljx_build_dir + 'ljx.exe');
+        let r = await run('cosmoc++ -Wl,--start-group -u ninja_initialize -L build lj_vm.o -lluajit -lljx -lninja -Wl,--end-group -o ' + ljx_build_dir + 'ljx.exe');
 
         if(r) {
             await run('zip bin/ljx.exe ljx.lua ninja.lua')

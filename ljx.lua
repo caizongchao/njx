@@ -1,7 +1,13 @@
+require('table.new'); require('table.clear')
+
 local ffi = require('ffi')
 local C = ffi
 
 _G.ffi = ffi; _G.C = C
+
+ffi.cdef [[
+
+]]
 
 local __mixin = '__mixin'
 

@@ -68,6 +68,8 @@ struct lua_value {
     template<of_invokable F>
     lua_value(F && f);
 
+    int type() const { return itype(&value); }
+
     lua_value & operator=(lua_value const & x) { value = x.value; return *this; }
 
     bool operator==(std::nullptr_t) const { return tvisnil(&value); }
@@ -132,8 +134,7 @@ struct lua_table {
     static lua_table make();
     static lua_table make(size_t asize, size_t hbits);
 
-    template<size_t N>
-    std::array<lua_value, N> & array() const { auto x = mref(value->array, lua_value); return (std::array<lua_value, N> &)*x; }
+    lua_value * array() const { return mref(value->array, lua_value); }
 
     size_t asize() const { return value->asize; }
 
@@ -286,7 +287,11 @@ struct lua_gcptr {
     lua_table & as_table() const { return *(lua_table *)this; }
     lua_string & as_string() const { return *(lua_string *)this; }
 
-    lua_value tvalue() const { uint64_t r = (uint64_t)value; r |= (((uint64_t) ~(value->gch.gct)) << 47); return {r}; }
+    lua_value tvalue() const {
+        int64_t t = ~value->gch.gct;
+        int64_t a = ((int64_t)value) | (t << 47);
+        lua_value r; r.value.u64 = a; return r;
+    }
 
     operator lua_value() const { return tvalue(); }
 
@@ -345,6 +350,10 @@ struct lua_state {
     lua_value operator[](std::string_view const & name) const { return _G()[name]; }
 
     lua_value operator()(std::string_view const & name) const { return _G()(name); }
+
+    lua_State * operator()() const { return L; }
+
+    lua_State * operator->() const { return L; }
 
     lua_state & push(lua_value const & x) { *L->top = x.value; incr_top(L); return *this; }
 

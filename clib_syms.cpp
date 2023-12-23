@@ -12,8 +12,9 @@ struct clib_sym_t {
 #define CLIB_SYM(name) { #name, (void *)(name) }
 
 int reftable_ref(lua_table t, lua_gcptr x) {
+    printf("reftable\n");
     __L->top->u64 = ((uint64_t)t.value) | (((uint64_t)LJ_TTAB) << 47); incr_top(__L);
-    __L->top->u64 = x.value.u64; incr_top(__L);
+    __L->top->u64 = x.tvalue().value.u64; incr_top(__L);
     int r = luaL_ref(__L, -2);
     lua_pop(__L, 2);
     return r;
@@ -63,5 +64,6 @@ extern "C" {
 }
 
 __attribute__((constructor)) static void clib_init() {
+    printf("clib_syms init\n");
     clib_syms = __clib_syms;
 }
