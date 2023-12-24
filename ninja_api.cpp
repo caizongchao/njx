@@ -14,8 +14,6 @@
 
 #include <filesystem>
 
-#include <ftw.h>
-
 namespace fs = std::filesystem;
 
 struct reftable {
@@ -130,8 +128,6 @@ static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path);
 
 extern int GuessParallelism();
 
-extern "C" {
-
 void ninja_test(const char * msg) {
     printf("test done\n");
 }
@@ -143,6 +139,8 @@ void ninja_config_apply() {
 }
 
 void ninja_reset() { $state.Reset(); }
+
+void ninja_clear() { $state.paths_.clear(); $state.edges_.clear(); }
 
 void ninja_dump() { $state.Dump(); }
 
@@ -379,7 +377,6 @@ void ninja_build(lua_gcptr targets) {
 void ninja_clean() {
     Cleaner cleaner(&$ninja.state_, $config, &$ninja.disk_interface_); cleaner.CleanAll(true);
 }
-}
 
 static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path) {
     const char * p = s;
@@ -588,6 +585,7 @@ static clib_sym_t __clib_syms[] = {
     CLIB_SYM(ninja_config_get),
     CLIB_SYM(ninja_config_apply),
     CLIB_SYM(ninja_reset),
+    CLIB_SYM(ninja_clear),
     CLIB_SYM(ninja_dump),
     CLIB_SYM(ninja_var_get),
     CLIB_SYM(ninja_var_set),
@@ -599,19 +597,15 @@ static clib_sym_t __clib_syms[] = {
     CLIB_SYM(ninja_clean),
     {0, 0}};
 
-extern "C" {
 extern clib_sym_t * clib_syms;
 
 static void clib_init() {
-    printf("clib_syms init\n");
     clib_syms = __clib_syms;
 }
 
-__attribute__((constructor)) void ninja_initialize() {
-    printf("ninja init\n");
+void ninja_initialize() {
     clib_init();
 
     $config.parallelism = GetProcessorCount();
     ninja_var_set("builddir", DEFAULT_BUILD_DIR);
-}
 }

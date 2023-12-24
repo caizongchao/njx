@@ -2,7 +2,11 @@
 #include "ljxx.h"
 #include "ioxx.h"
 
+void ninja_initialize();
+
 int main(int argc, char ** argv) {
+    ninja_initialize();
+    
     $L([&]() {
         lua_table package = $L["package"]; {
             package.def("path", "./?.lua;/zip/?.lua");

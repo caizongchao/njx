@@ -18,6 +18,7 @@ ffi.cdef [[
     void * ninja_config_get();
     void ninja_config_apply();
     void ninja_reset();
+    void ninja_clear();
     void ninja_dump();
     const char * ninja_var_get(const char * key);
     void ninja_var_set(const char * key, const char * value);
@@ -29,12 +30,34 @@ ffi.cdef [[
     void ninja_clean();
 ]]
 
+local EXTENSION_NAME = {}; do
+    if ffi.os == 'Windows' then
+        EXTENSION_NAME['binary'] = '.exe'
+        EXTENSION_NAME['shared'] = '.dll'
+        EXTENSION_NAME['static'] = '.lib'
+    elseif ffi.os == 'Linux' then
+        EXTENSION_NAME['binary'] = ''
+        EXTENSION_NAME['shared'] = '.so'
+        EXTENSION_NAME['static'] = '.a'
+    else
+        fatal('unsupported platform: %s', ffi.os)
+    end    
+end
+
 local ninja = {}; _G.ninja = ninja
 
 ninja.targets = {}; ninja.toolchains = {}
 
 function ninja.config(fx)
     if fx(C.ninja_config()) ~= false then C.ninja_config_apply() end
+end
+
+function ninja.build_dir(dir)
+    if not dir then
+        return C.ninja_var_get('builddir')
+    else
+        C.ninja_var_set('builddir', dir)
+    end
 end
 
 local function ensure_field(t, field, default)
@@ -134,6 +157,21 @@ local gcc_toolchain; gcc_toolchain = object({
         end,
 
         basic = {
+            prepare = function(self)
+                local build_dir = ninja.build_dir()
+
+                local output = path.combine(build_dir, self.name .. EXTENSION_NAME[self.type])
+
+                __buf:ninja_reset()
+
+                for _, dir in ipairs(self.opts.include_dirs or {}) do
+                    __buf:put('-I', path.try_quote(dir))
+                end
+
+
+
+
+            end,
         },
     },
 }); ninja.toolchains.gcc = gcc_toolchain
@@ -175,3 +213,19 @@ function ninja.target(toolchain, name, type, opts)
     return ninja[toolchain].target.new(name, type, opts)
 end
 
+local function target_walk(target, fx)
+    if target.visited then return end
+    if target.opts.deps then
+        for _, dep in ipairs(target.opts.deps) do target_walk(dep, fx) end
+    end
+    target.visited = true; fx(target)
+end
+
+function ninja.target_foreach(fx)
+    -- walk all targets
+    for _, target in pairs(ninja.targets) do
+        target_walk(target, fx)
+    end
+    -- clear visited flag
+    for _, target in pairs(ninja.targets) do target.visited = nil end
+end

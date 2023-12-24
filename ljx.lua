@@ -1,12 +1,54 @@
 require('table.new'); require('table.clear')
 
-local ffi = require('ffi')
-local C = ffi
+local ffi = require('ffi'); local C = ffi.C
 
 _G.ffi = ffi; _G.C = C
 
-ffi.cdef [[
+local ON, OFF = true, false; _G.ON = ON; _G.OFF = OFF
+local YES, NO = true, false; _G.YES = YES; _G.NO = NO
 
+local rand = math.random
+
+-- seeding the random number generator
+local seed = os.time(); math.randomseed(seed)
+
+local buffer = require('string.buffer'); _G.buffer = buffer
+local __buf = buffer.new(); _G.__buf = __buf
+
+local function buffer_rep(buf, str, n)
+    for i = 1, n do
+        buf:put(str)
+    end
+    return buf
+end
+
+local function buffer_indent(buf, indent)
+    return buffer_rep(buf, ' ', indent)
+end
+
+local uuid_template = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'
+
+local function uuid()
+    local r = string.gsub(uuid_template, '[xy]', function (c)
+        local v = (c == 'x') and rand(0, 0xf) or rand(8, 0xb)
+        return string.format('%x', v)
+    end)
+    return r
+end; _G.uuid = uuid
+
+local randstr_template = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+
+local function randstr(len)
+    __buf:reset(); for i = 1, len do
+        local n = rand(1, #randstr_template); __buf:put(randstr_template:sub(n, n))
+    end
+    return __buf:tostring()
+end; _G.randstr = randstr
+
+ffi.cdef [[
+    gcptr reftable_new(uint32_t size);
+    int reftable_ref(gcptr t, gcptr v);
+    void reftable_unref(gcptr t, int r);
 ]]
 
 local __mixin = '__mixin'
@@ -132,21 +174,6 @@ setmetatable(string, {
         ends_with = string_endswith,
     }
 })
-
-local buffer = require('string.buffer')
-
-local __buf = buffer.new()
-
-local function buffer_rep(buf, str, n)
-    for i = 1, n do
-        buf:put(str)
-    end
-    return buf
-end
-
-local function buffer_indent(buf, indent)
-    return buffer_rep(buf, ' ', indent)
-end
 
 local TAB_SIZE = 4
 local TAB = '    '
