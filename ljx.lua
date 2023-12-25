@@ -38,11 +38,15 @@ end; _G.uuid = uuid
 
 local randstr_template = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
 
-local function randstr(len)
-    __buf:reset(); for i = 1, len do
-        local n = rand(1, #randstr_template); __buf:put(randstr_template:sub(n, n))
+local function randbuf(buf, len)
+    for i = 1, len do
+        local n = rand(1, #randstr_template); buf:put(randstr_template:sub(n, n))
     end
-    return __buf:tostring()
+    return buf
+end; _G.randbuf = randbuf
+
+local function randstr(len)
+    __buf:reset(); return randbuf(__buf, len):tostring()
 end; _G.randstr = randstr
 
 ffi.cdef [[
@@ -159,19 +163,19 @@ local function string_split(str, sep)
     return list
 end
 
-local function string_startswith(str, prefix)
+local function string_starts_with(str, prefix)
     return str:find(prefix, 1) == 1
 end
 
-local function string_endswith(str, suffix)
+local function string_ends_with(str, suffix)
     return str:find(suffix, - #suffix) ~= nil
 end
 
 setmetatable(string, {
     __index = {
         split = string_split,
-        starts_with = string_startswith,
-        ends_with = string_endswith,
+        starts_with = string_starts_with,
+        ends_with = string_ends_with,
     }
 })
 

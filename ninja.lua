@@ -41,7 +41,7 @@ local EXTENSION_NAME = {}; do
         EXTENSION_NAME['static'] = '.a'
     else
         fatal('unsupported platform: %s', ffi.os)
-    end    
+    end
 end
 
 local ninja = {}; _G.ninja = ninja
@@ -68,6 +68,40 @@ end
 
 local function as_list(x)
     if type(x) == 'table' then return x else return { x } end
+end
+
+local function options_merge(tout, tin, ...)
+    if not tin then return tout end
+    for k, x in pairs(as_list(tin)) do
+        if type(k) == 'number' then
+            table.insert(tout, x)
+        elseif x == false then
+            tout[k] = nil
+        else
+            tout[k] = x
+        end
+    end
+    return options_merge(tout, ...)
+end
+
+local function options_to_string(t)
+    local buf = __buf:reset()
+    for k, x in pairs(t) do
+        if type(k) == 'number' then
+            buf:put(x, ' ')
+        elseif type(x) == 'boolean' then
+            if x == true then
+                buf:put(k, ' ')
+            end
+        else
+            buf:put(k, '=', x, ' ')
+        end
+    end
+    return buf:tostring()
+end
+
+local function symgen(prefix)
+    __buf:reset(); __buf:put(prefix); randbuf(__buf, 16); return __buf:tostring()
 end
 
 local basic_cc_toolchain; basic_cc_toolchain = object({
@@ -119,7 +153,12 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
             define = function(self, def)
                 local defs = ensure_field(self.opts, 'defines', {})
-                for _, d in ipairs(as_list(def)) do table.insert(defs, d) end
+                for _, d in ipairs(as_list(def)) do
+                    if not def:starts_with('-D') then
+                        d = '-D' .. d
+                    end
+                    table.insert(defs, d)
+                end
                 return self
             end,
 
@@ -162,15 +201,17 @@ local gcc_toolchain; gcc_toolchain = object({
 
                 local output = path.combine(build_dir, self.name .. EXTENSION_NAME[self.type])
 
-                __buf:ninja_reset()
-
-                for _, dir in ipairs(self.opts.include_dirs or {}) do
-                    __buf:put('-I', path.try_quote(dir))
+                for _, def in ipairs(self.opts.defines or {}) do
+                    __buf:put('-D', def, ' ')
                 end
 
+                for _, dir in ipairs(self.opts.include_dirs or {}) do
+                    __buf:put('-I', path.try_quote(dir), ' ')
+                end
 
-
-
+                for _, inc in ipairs(self.opts.includes or {}) do
+                    __buf:put('-include ', path.try_quote(inc), ' ')
+                end
             end,
         },
     },
