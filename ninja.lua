@@ -73,22 +73,54 @@ end
 local function options_merge(tout, tin, ...)
     if not tin then return tout end
     for k, x in pairs(as_list(tin)) do
-        if type(k) == 'number' then
-            table.insert(tout, x)
+        if k == 'public' then
+            goto continue
+        elseif type(k) == 'number' then
+            if type(x) == 'table' then
+                options_merge(tout, x)
+            else
+                table.insert(tout, x)
+            end
         elseif x == false then
             tout[k] = nil
         else
             tout[k] = x
         end
+        ::continue::
     end
     return options_merge(tout, ...)
 end
 
-local function options_to_string(t)
-    local buf = __buf:reset()
+local function options_public_merge(tout, tin, ...)
+    if not tin then return tout end
+    if type(tin) == 'table' then
+        if tin.public then
+            options_merge(tout, tin)
+        else
+            for k, x in pairs(tin) do
+                if type(k) == 'number' then
+                    if type(x) == 'table' then
+                        options_public_merge(tout, x)
+                    end
+                elseif type(k) == 'table' and x then
+                    options_public_merge(tout, k)
+                end
+            end
+        end
+    end
+    return options_public_merge(tout, ...)
+end
+
+local function options_to_buf(buf, t)
     for k, x in pairs(t) do
-        if type(k) == 'number' then
-            buf:put(x, ' ')
+        if k == 'public' then
+            goto continue
+        elseif type(k) == 'number' then
+            if type(x) == 'table' then
+                options_to_buf(buf, x)
+            else
+                buf:put(x, ' ')
+            end
         elseif type(x) == 'boolean' then
             if x == true then
                 buf:put(k, ' ')
@@ -96,12 +128,21 @@ local function options_to_string(t)
         else
             buf:put(k, '=', x, ' ')
         end
+        ::continue::
     end
-    return buf:tostring()
+    return buf
 end
 
+local function options_to_string(t)
+    return options_to_buf(__buf:reset(), t):tostring()
+end
+
+-- local function symgen(prefix)
+--     __buf:reset(); __buf:put(prefix); randbuf(__buf, 16); return __buf:tostring()
+-- end
+
 local function symgen(prefix)
-    __buf:reset(); __buf:put(prefix); randbuf(__buf, 16); return __buf:tostring()
+    return prefix .. tostring(__counter_next())
 end
 
 local basic_cc_toolchain; basic_cc_toolchain = object({
@@ -129,25 +170,45 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
             include_dir = function(self, dir)
                 local dirs = ensure_field(self.opts, 'include_dirs', {})
-                for _, d in ipairs(as_list(dir)) do table.insert(dirs, d) end
+                for _, d in ipairs(as_list(dir)) do
+                    if not d:starts_with('-I') then
+                        d = '-I' .. d
+                    end
+                    table.insert(dirs, d)
+                end
                 return self
             end,
 
             include = function(self, inc)
                 local incs = ensure_field(self.opts, 'includes', {})
-                for _, i in ipairs(as_list(inc)) do table.insert(incs, i) end
+                for _, i in ipairs(as_list(inc)) do
+                    if not i:starts_with('-include ') then
+                        i = '-include ' .. i
+                    end
+                    table.insert(incs, i)
+                end
                 return self
             end,
 
             lib_dir = function(self, dir)
                 local dirs = ensure_field(self.opts, 'lib_dirs', {})
-                for _, d in ipairs(as_list(dir)) do table.insert(dirs, d) end
+                for _, d in ipairs(as_list(dir)) do
+                    if not d:starts_with('-L') then
+                        d = '-L' .. d
+                    end
+                    table.insert(dirs, d)
+                end
                 return self
             end,
 
             lib = function(self, lib)
                 local libs = ensure_field(self.opts, 'libs', {})
-                for _, l in ipairs(as_list(lib)) do table.insert(libs, l) end
+                for _, l in ipairs(as_list(lib)) do
+                    if not l:starts_with('-l') then
+                        l = '-l' .. l
+                    end
+                    table.insert(libs, l)
+                end
                 return self
             end,
 
@@ -168,8 +229,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 return self
             end,
 
-            cc_flags = function(self, flags)
-                local xs = ensure_field(self.opts, 'cc_flags', {})
+            cx_flags = function(self, flags)
+                local xs = ensure_field(self.opts, 'cx_flags', {})
                 for _, f in ipairs(as_list(flags)) do table.insert(xs, f) end
                 return self
             end,
@@ -201,16 +262,39 @@ local gcc_toolchain; gcc_toolchain = object({
 
                 local output = path.combine(build_dir, self.name .. EXTENSION_NAME[self.type])
 
-                for _, def in ipairs(self.opts.defines or {}) do
-                    __buf:put('-D', def, ' ')
+                local opts = self.opts
+
+                local c_options = options_merge({
+                    '-c', '-o', output,
+                }, opts.c_flags, opts.cx_flags, opts.defines, opts.includes, opts.include_dirs)
+
+                if opts.deps then
+                    for _, dep in ipairs(opts.deps) do
+                        local opts = dep.opts
+                        options_public_merge(c_options, opts.c_flags, opts.cx_flags, opts.defines, opts.includes, opts.include_dirs)
+                    end
                 end
 
-                for _, dir in ipairs(self.opts.include_dirs or {}) do
-                    __buf:put('-I', path.try_quote(dir), ' ')
+                local cxx_options = options_merge({
+                    '-c', '-o', output,
+                }, opts.cxx_flags, opts.cx_flags, opts.defines, opts.includes, opts.include_dirs)
+
+                if opts.deps then
+                    for _, dep in ipairs(opts.deps) do
+                        local opts = dep.opts
+                        options_public_merge(cxx_options, opts.cxx_flags, opts.cx_flags, opts.defines, opts.includes, opts.include_dirs)
+                    end
                 end
 
-                for _, inc in ipairs(self.opts.includes or {}) do
-                    __buf:put('-include ', path.try_quote(inc), ' ')
+                local ld_options = options_merge({
+                    '-o', output,
+                }, opts.ld_flags, opts.libs, opts.lib_dirs)
+
+                if opts.deps then
+                    for _, dep in ipairs(opts.deps) do
+                        local opts = dep.opts
+                        options_public_merge(ld_options, opts.ld_flags, opts.libs, opts.lib_dirs)
+                    end
                 end
             end,
         },

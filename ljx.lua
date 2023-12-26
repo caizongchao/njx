@@ -4,6 +4,12 @@ local ffi = require('ffi'); local C = ffi.C
 
 _G.ffi = ffi; _G.C = C
 
+local __counter = -1
+
+local function __counter_next()
+    __counter = __counter + 1; return __counter
+end; _G.__counter_next = __counter_next
+
 local ON, OFF = true, false; _G.ON = ON; _G.OFF = OFF
 local YES, NO = true, false; _G.YES = YES; _G.NO = NO
 

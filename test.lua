@@ -1,7 +1,7 @@
 local jit_v = require("jit.v"); jit_v.on()
 
-print(uuid())
-
-print(randstr(8))
-
-print(randstr(16))
+print(__counter_next())
+print(__counter_next())
+print(__counter_next())
+print(__counter_next())
+print('hello' .. __counter_next())
