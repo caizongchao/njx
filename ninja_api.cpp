@@ -155,7 +155,7 @@ void ninja_pool_add(const char * name, int depth) {
     $state.AddPool(new Pool(name, depth));
 }
 
-void * ninja_rule_add(const char * name, lua_table vars) {
+void ninja_rule_add(const char * name, lua_table vars) {
     ($env->LookupRuleCurrentScope(name) == nullptr) || fatal("duplicate rule '%s'", name);
 
     auto r = new Rule(name);
@@ -172,7 +172,7 @@ void * ninja_rule_add(const char * name, lua_table vars) {
         }
     });
 
-    $state.bindings_.AddRule(r); return r;
+    $state.bindings_.AddRule(r);
 }
 
 std::string ninja_path_read(BindingEnv * env, const char * s, uint64_t * slash_bits = 0) {

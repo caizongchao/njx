@@ -32,21 +32,18 @@ local function buffer_indent(buf, indent)
     return buffer_rep(buf, ' ', indent)
 end
 
-local uuid_template = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'
-
-local function uuid()
-    local r = string.gsub(uuid_template, '[xy]', function (c)
-        local v = (c == 'x') and rand(0, 0xf) or rand(8, 0xb)
-        return string.format('%x', v)
-    end)
-    return r
+local function uuid(len)
+    local buf = __buf:reset(); len = len or 32
+    for i = 1, len do
+        buf:putf('%x', rand(0, 15))
+    end
+    return buf:tostring()
 end; _G.uuid = uuid
 
-local randstr_template = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-
 local function randbuf(buf, len)
+    len = len or 32
     for i = 1, len do
-        local n = rand(1, #randstr_template); buf:put(randstr_template:sub(n, n))
+        buf:putf('%x', rand(0, 15))
     end
     return buf
 end; _G.randbuf = randbuf
@@ -64,7 +61,7 @@ ffi.cdef [[
 local __mixin = '__mixin'
 
 local function object(x)
-    x = x or {}; x.__index = function (self, key)
+    x = x or {}; x.__index = function(self, key)
         local mx = rawget(self, __mixin); if mx then
             for _, m in ipairs(mx) do
                 local v = m[key]; if v then
@@ -161,6 +158,14 @@ setmetatable(table, {
         map = table_map,
     }
 })
+
+local function string_concat(...)
+    local c = select('#', ...)
+    local buf = __buf:reset(); for i = 1, c do
+        buf:put(select(i, ...))
+    end
+    return buf:tostring()
+end
 
 local function string_split(str, sep)
     local list = {}; for s in str:gmatch('[^' .. sep .. ']+') do
@@ -503,12 +508,12 @@ local function files_foreach(path, fx)
 
         if path_is_wildcard(ap) then
             local dir, wildcard = path_dfname(ap)
-            path = dir; opts = {wildcard = wildcard, exclusions = exclusions, fx}
+            path = dir; opts = { wildcard = wildcard, exclusions = exclusions, fx }
         else
             local ftype = path_ftype(ap); if ftype == 'file' then
                 return fx(ap)
             else
-                path = ap; opts = {exclusions = exclusions, fx}
+                path = ap; opts = { exclusions = exclusions, fx }
             end
         end
     else

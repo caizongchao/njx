@@ -23,7 +23,7 @@ ffi.cdef [[
     const char * ninja_var_get(const char * key);
     void ninja_var_set(const char * key, const char * value);
     void ninja_pool_add(const char * name, int depth);
-    void * ninja_rule_add(const char * name, gcptr vars);
+    void ninja_rule_add(const char * name, gcptr vars);
     void ninja_edge_add(gcptr outputs, const char * rule_name, gcptr inputs, gcptr vars);
     void ninja_default_add(gcptr defaults);
     void ninja_build(gcptr targets);
@@ -137,9 +137,19 @@ local function options_to_string(t)
     return options_to_buf(__buf:reset(), t):tostring()
 end
 
--- local function symgen(prefix)
---     __buf:reset(); __buf:put(prefix); randbuf(__buf, 16); return __buf:tostring()
--- end
+local function options_of(t, ...)
+    local c = select('#', ...)
+    local r = {}
+
+    for i = 1, c do
+        local x = select(i, ...)
+        if x then
+            local a = t[x]; if a then
+                table.insert(r, a)
+            end
+        end
+    end
+end
 
 local function symgen(prefix)
     return prefix .. tostring(__counter_next())
@@ -257,43 +267,136 @@ local gcc_toolchain; gcc_toolchain = object({
         end,
 
         basic = {
+            cc = 'gcc',
+            cxx = 'g++',
+            ar = 'ar',
+            ld = 'g++',
+
             prepare = function(self)
-                local build_dir = ninja.build_dir()
+                local build_dir = path.combine(ninja.build_dir(), self.name)
 
                 local output = path.combine(build_dir, self.name .. EXTENSION_NAME[self.type])
 
                 local opts = self.opts
 
-                local c_options = options_merge({
-                    '-c', '-o', output,
-                }, opts.c_flags, opts.cx_flags, opts.defines, opts.includes, opts.include_dirs)
+                local c_options = options_merge({}, options_of(opts, 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'))
 
                 if opts.deps then
                     for _, dep in ipairs(opts.deps) do
                         local opts = dep.opts
-                        options_public_merge(c_options, opts.c_flags, opts.cx_flags, opts.defines, opts.includes, opts.include_dirs)
+                        options_public_merge(c_options, options_of(opts, 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'))
                     end
                 end
 
-                local cxx_options = options_merge({
-                    '-c', '-o', output,
-                }, opts.cxx_flags, opts.cx_flags, opts.defines, opts.includes, opts.include_dirs)
+                local cxx_options = options_merge({}, options_of(opts, 'cxx_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'))
 
                 if opts.deps then
                     for _, dep in ipairs(opts.deps) do
                         local opts = dep.opts
-                        options_public_merge(cxx_options, opts.cxx_flags, opts.cx_flags, opts.defines, opts.includes, opts.include_dirs)
+                        options_public_merge(cxx_options, options_of(opts, 'cxx_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'))
                     end
                 end
 
-                local ld_options = options_merge({
-                    '-o', output,
-                }, opts.ld_flags, opts.libs, opts.lib_dirs)
+                local ld_options = options_merge({}, options_of(opts, 'ld_flags', 'libs', 'lib_dirs'))
 
                 if opts.deps then
                     for _, dep in ipairs(opts.deps) do
                         local opts = dep.opts
-                        options_public_merge(ld_options, opts.ld_flags, opts.libs, opts.lib_dirs)
+                        options_public_merge(ld_options, options_of(opts, 'ld_flags', 'libs', 'lib_dirs'))
+                    end
+                end
+
+                local rules = {}
+
+                local cc_rule_name = symgen(self.name .. '_cc_'); do
+                    C.ninja_rule_add(cc_rule_name, {
+                        command = string.concat(self.cc, ' ', options_to_string(c_options), ' -MMD -MF $out.d $in -c -o $out'),
+                        depfile = '$out.d',
+                        deps = 'gcc',
+                        description = 'CC $out',
+                    })
+                end
+                rules['.c'] = cc_rule_name
+
+                local cxx_rule_name = symgen(self.name .. '_cxx_'); do
+                    C.ninja_rule_add(cxx_rule_name, {
+                        command = string.concat(self.cxx, ' ', options_to_string(cxx_options), ' -MMD -MF $out.d $in -c -o $out'),
+                        depfile = '$out.d',
+                        deps = 'gcc',
+                        description = 'CXX $out',
+                    })
+                end
+                rules['.cpp'] = cxx_rule_name
+                rules['.cxx'] = cxx_rule_name
+                rules['.cc'] = cxx_rule_name
+
+                local ld_rule_name = symgen(self.name .. '_ld_'); do
+                    C.ninja_rule_add(ld_rule_name, {
+                        command = string.concat(self.ld, ' ', options_to_string(ld_options), ' $in -o $out'),
+                        description = 'LD $out',
+                    })
+                end
+
+                local ar_rule_name = symgen(self.name .. '_ar_'); do
+                    C.ninja_rule_add(ar_rule_name, {
+                        command = string.concat(self.ar, ' ',' rcs $out $in'),
+                        description = 'AR $out',
+                    })
+                end
+
+                local objs = {}
+
+                local srcs = opts.srcs; if srcs then
+                    local function add_src(src, rules)
+                        local obj = path.combine(build_dir, src .. '.o')
+
+                        table.insert(objs, obj)
+
+                        C.ninja_edge_add(obj, rules[path.extension(src)], src, nil)
+                    end
+
+                    for _, src in ipairs(srcs) do
+                        if type(src) == 'table' then
+                            local opts = {}
+                            for k, v in pairs(src) do
+                                if type(k) == 'number' then
+                                    goto continue
+                                else
+                                    opts[k] = v
+                                end
+                                ::continue::
+                            end
+
+                            local rules = {}
+
+                            local cc_rule_name = symgen(self.name .. '_cc_'); do
+                                C.ninja_rule_add(cc_rule_name, {
+                                    command = string.concat(self.cc, ' ', options_to_string(options_merge({}, c_options, options_of(opts, 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'))), ' -MMD -MF $out.d $in -c -o $out'),
+                                    depfile = '$out.d',
+                                    deps = 'gcc',
+                                    description = 'CC $out',
+                                })
+                            end
+                            rules['.c'] = cc_rule_name
+            
+                            local cxx_rule_name = symgen(self.name .. '_cxx_'); do
+                                C.ninja_rule_add(cxx_rule_name, {
+                                    command = string.concat(self.cxx, ' ', options_to_string(options_merge({}, cxx_options, options_of(opts, 'cxx_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'))), ' -MMD -MF $out.d $in -c -o $out'),
+                                    depfile = '$out.d',
+                                    deps = 'gcc',
+                                    description = 'CXX $out',
+                                })
+                            end
+                            rules['.cpp'] = cxx_rule_name
+                            rules['.cxx'] = cxx_rule_name
+                            rules['.cc'] = cxx_rule_name
+            
+                            for _, x in ipairs(src) do
+                                add_src(x, rules)
+                            end
+                        else
+                            add_src(src, rules)
+                        end
                     end
                 end
             end,
