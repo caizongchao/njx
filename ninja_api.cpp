@@ -14,6 +14,9 @@
 
 #include <filesystem>
 
+#define _COSMO_SOURCE
+#include <libc/dce.h>
+
 namespace fs = std::filesystem;
 
 struct reftable {
@@ -572,6 +575,10 @@ static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path) 
     return true;
 }
 
+const char * host_os() {
+    if(IsWindows()) return "Windows"; else return "Linux";
+}
+
 struct clib_sym_t {
     const char * name; void * sym;
 };
@@ -579,6 +586,7 @@ struct clib_sym_t {
 #define CLIB_SYM(name) { #name, (void *)(name) }
 
 static clib_sym_t __clib_syms[] = {
+    CLIB_SYM(host_os),
     CLIB_SYM(reftable_new),
     CLIB_SYM(reftable_ref),
     CLIB_SYM(reftable_unref),

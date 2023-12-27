@@ -1,3 +1,4 @@
+---@diagnostic disable: deprecated, undefined-field
 ffi.cdef [[
     enum {
         NINJA__QUIET,  // No output -- used when testing.
@@ -15,6 +16,7 @@ ffi.cdef [[
         //DepfileParserOptions depfile_parser_options;
     } ninja_config_t;
 
+    const char * host_os();
     void * ninja_config_get();
     void ninja_config_apply();
     void ninja_reset();
@@ -30,17 +32,19 @@ ffi.cdef [[
     void ninja_clean();
 ]]
 
+local HOST_OS = ffi.string(C.host_os())
+
 local EXTENSION_NAME = {}; do
-    if ffi.os == 'Windows' then
+    if HOST_OS == 'Windows' then
         EXTENSION_NAME['binary'] = '.exe'
         EXTENSION_NAME['shared'] = '.dll'
         EXTENSION_NAME['static'] = '.lib'
-    elseif ffi.os == 'Linux' then
+    elseif HOST_OS == 'Linux' then
         EXTENSION_NAME['binary'] = ''
         EXTENSION_NAME['shared'] = '.so'
         EXTENSION_NAME['static'] = '.a'
     else
-        fatal('unsupported platform: %s', ffi.os)
+        fatal('unsupported platform: %s', HOST_OS)
     end
 end
 
@@ -279,38 +283,46 @@ local gcc_toolchain; gcc_toolchain = object({
 
                 local opts = self.opts
 
-                local c_options = options_merge({}, options_of(opts, 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'))
+                local c_option_fields = {'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'}
+
+                local c_options = options_merge({}, options_of(opts, unpack(c_option_fields)))
 
                 if opts.deps then
                     for _, dep in ipairs(opts.deps) do
                         local opts = dep.opts
-                        options_public_merge(c_options, options_of(opts, 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'))
+                        options_public_merge(c_options, options_of(opts, unpack(c_option_fields)))
                     end
                 end
 
-                local cxx_options = options_merge({}, options_of(opts, 'cxx_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'))
+                local cxx_option_fields = {'cxx_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'}
+
+                local cxx_options = options_merge({}, options_of(opts, unpack(cxx_option_fields)))
 
                 if opts.deps then
                     for _, dep in ipairs(opts.deps) do
                         local opts = dep.opts
-                        options_public_merge(cxx_options, options_of(opts, 'cxx_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'))
+                        options_public_merge(cxx_options, options_of(opts, unpack(cxx_option_fields)))
                     end
                 end
 
-                local ld_options = options_merge({}, options_of(opts, 'ld_flags', 'libs', 'lib_dirs'))
+                local ld_option_fields = {'ld_flags', 'libs', 'lib_dirs'}
+
+                local ld_options = options_merge({}, options_of(opts, unpack(ld_option_fields)))
 
                 if opts.deps then
                     for _, dep in ipairs(opts.deps) do
                         local opts = dep.opts
-                        options_public_merge(ld_options, options_of(opts, 'ld_flags', 'libs', 'lib_dirs'))
+                        options_public_merge(ld_options, options_of(opts, unpack(ld_option_fields)))
                     end
                 end
 
                 local rules = {}
 
+                local rule_txt_output = ' -MMD -MF $out.d $in -c -o $out'
+
                 local cc_rule_name = symgen(self.name .. '_cc_'); do
                     C.ninja_rule_add(cc_rule_name, {
-                        command = string.concat(self.cc, ' ', options_to_string(c_options), ' -MMD -MF $out.d $in -c -o $out'),
+                        command = string.concat(self.cc, ' ', options_to_string(c_options), rule_txt_output),
                         depfile = '$out.d',
                         deps = 'gcc',
                         description = 'CC $out',
@@ -320,7 +332,7 @@ local gcc_toolchain; gcc_toolchain = object({
 
                 local cxx_rule_name = symgen(self.name .. '_cxx_'); do
                     C.ninja_rule_add(cxx_rule_name, {
-                        command = string.concat(self.cxx, ' ', options_to_string(cxx_options), ' -MMD -MF $out.d $in -c -o $out'),
+                        command = string.concat(self.cxx, ' ', options_to_string(cxx_options), rule_txt_output),
                         depfile = '$out.d',
                         deps = 'gcc',
                         description = 'CXX $out',
@@ -371,7 +383,7 @@ local gcc_toolchain; gcc_toolchain = object({
 
                             local cc_rule_name = symgen(self.name .. '_cc_'); do
                                 C.ninja_rule_add(cc_rule_name, {
-                                    command = string.concat(self.cc, ' ', options_to_string(options_merge({}, c_options, options_of(opts, 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'))), ' -MMD -MF $out.d $in -c -o $out'),
+                                    command = string.concat(self.cc, ' ', options_to_string(options_merge({}, c_options, options_of(opts, unpack(c_option_fields)))), rule_txt_output),
                                     depfile = '$out.d',
                                     deps = 'gcc',
                                     description = 'CC $out',
@@ -381,7 +393,7 @@ local gcc_toolchain; gcc_toolchain = object({
             
                             local cxx_rule_name = symgen(self.name .. '_cxx_'); do
                                 C.ninja_rule_add(cxx_rule_name, {
-                                    command = string.concat(self.cxx, ' ', options_to_string(options_merge({}, cxx_options, options_of(opts, 'cxx_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'))), ' -MMD -MF $out.d $in -c -o $out'),
+                                    command = string.concat(self.cxx, ' ', options_to_string(options_merge({}, cxx_options, options_of(opts, unpack(cxx_option_fields)))), rule_txt_output),
                                     depfile = '$out.d',
                                     deps = 'gcc',
                                     description = 'CXX $out',
@@ -392,7 +404,13 @@ local gcc_toolchain; gcc_toolchain = object({
                             rules['.cc'] = cxx_rule_name
             
                             for _, x in ipairs(src) do
-                                add_src(x, rules)
+                                if path.is_wildcard(x) then
+                                    fs.foreach(x, function(f)
+                                        add_src(f, rules)
+                                    end)
+                                else
+                                    add_src(x, rules)
+                                end
                             end
                         else
                             add_src(src, rules)
@@ -457,3 +475,6 @@ function ninja.target_foreach(fx)
     -- clear visited flag
     for _, target in pairs(ninja.targets) do target.visited = nil end
 end
+
+
+print('ninja')
