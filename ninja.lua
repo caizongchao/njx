@@ -155,6 +155,13 @@ local function options_of(t, ...)
     end
 end
 
+local options = {
+    merge = options_merge,
+    public_merge = options_public_merge,
+    to_string = options_to_string,
+    of = options_of,
+}; _G.options = options
+
 local function symgen(prefix)
     return prefix .. tostring(__counter_next())
 end
@@ -477,4 +484,3 @@ function ninja.target_foreach(fx)
 end
 
 
-print('ninja')
