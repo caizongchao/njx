@@ -122,10 +122,14 @@ local function table_merge(t, x, ...)
     if x then
         if type(x) == 'table' then
             for k, v in pairs(x) do
-                t[k] = v
+                if type(k) == 'number' then
+                    table.insert(t, v)
+                else
+                    t[k] = v
+                end
             end
         else
-            t[#t + 1] = x
+            table.insert(t, x)
         end
         return table_merge(t, ...)
     else
@@ -148,6 +152,27 @@ local function table_map(t, fx)
     return r
 end
 
+local function table_mapk(t, fx)
+    local r = {}; for k, v in pairs(t) do
+        if type(k) == 'number' then
+            if type(v) == 'table' then
+                v = table_mapk(v, fx)
+            else
+                v = fx(v)
+            end
+
+            if v ~= nil then
+                r[k] = v
+            end
+        else
+            k = fx(k); if k ~= nil then
+                r[k] = v
+            end
+        end
+    end
+    return r
+end
+
 setmetatable(table, {
     __index = {
         isempty = table_isempty,
@@ -156,6 +181,7 @@ setmetatable(table, {
         push = table_push,
         pop = table_pop,
         map = table_map,
+        mapk = table_mapk,
     }
 })
 

@@ -74,6 +74,12 @@ local function as_list(x)
     if type(x) == 'table' then return x else return { x } end
 end
 
+local function options_map(t, fx)
+    table.mapk(t, function(k)
+        if k == 'public' then return k else return fx(k) end
+    end)
+end
+
 local function options_merge(tout, tin, ...)
     if not tin then return tout end
     for k, x in pairs(as_list(tin)) do
@@ -179,92 +185,92 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
         basic = {
             deps = function(self, xs)
                 local deps = ensure_field(self.opts, 'deps', {})
-                for _, x in ipairs(as_list(xs)) do table.insert(deps, x) end
+                table.merge(deps, as_list(xs))
                 return self
             end,
 
             src = function(self, src)
                 local srcs = ensure_field(self.opts, 'srcs', {})
-                for _, s in ipairs(as_list(src)) do table.insert(srcs, s) end
+                table.merge(srcs, as_list(src))
                 return self
             end,
 
             include_dir = function(self, dir)
                 local dirs = ensure_field(self.opts, 'include_dirs', {})
-                for _, d in ipairs(as_list(dir)) do
-                    if not d:starts_with('-I') then
-                        d = '-I' .. d
+                table.merge(dirs, options_map(as_list(dir), function(x)
+                    if not x:starts_with('-I') then
+                        x = '-I' .. x
                     end
-                    table.insert(dirs, d)
-                end
+                    return x
+                end))
                 return self
             end,
 
             include = function(self, inc)
                 local incs = ensure_field(self.opts, 'includes', {})
-                for _, i in ipairs(as_list(inc)) do
-                    if not i:starts_with('-include ') then
-                        i = '-include ' .. i
+                table.merge(incs, options_map(as_list(inc), function(x)
+                    if not x:starts_with('-include ') then
+                        x = '-include ' .. x
                     end
-                    table.insert(incs, i)
-                end
+                    return x
+                end))
                 return self
             end,
 
             lib_dir = function(self, dir)
                 local dirs = ensure_field(self.opts, 'lib_dirs', {})
-                for _, d in ipairs(as_list(dir)) do
-                    if not d:starts_with('-L') then
-                        d = '-L' .. d
+                table.merge(dirs, options_map(as_list(dir), function(x)
+                    if not x:starts_with('-L') then
+                        x = '-L' .. x
                     end
-                    table.insert(dirs, d)
-                end
+                    return x
+                end))
                 return self
             end,
 
             lib = function(self, lib)
                 local libs = ensure_field(self.opts, 'libs', {})
-                for _, l in ipairs(as_list(lib)) do
-                    if not l:starts_with('-l') then
-                        l = '-l' .. l
+                table.merge(libs, options_map(as_list(lib), function(x)
+                    if not x:starts_with('-l') then
+                        x = '-l' .. x
                     end
-                    table.insert(libs, l)
-                end
+                    return x
+                end))
                 return self
             end,
 
             define = function(self, def)
                 local defs = ensure_field(self.opts, 'defines', {})
-                for _, d in ipairs(as_list(def)) do
-                    if not def:starts_with('-D') then
-                        d = '-D' .. d
+                table.merge(defs, options_map(as_list(def), function(x)
+                    if not x:starts_with('-D') then
+                        x = '-D' .. x
                     end
-                    table.insert(defs, d)
-                end
+                    return x
+                end))
                 return self
             end,
 
             c_flags = function(self, flags)
                 local xs = ensure_field(self.opts, 'c_flags', {})
-                for _, f in ipairs(as_list(flags)) do table.insert(xs, f) end
+                table.mserge(xs, as_list(flags))
                 return self
             end,
 
             cx_flags = function(self, flags)
                 local xs = ensure_field(self.opts, 'cx_flags', {})
-                for _, f in ipairs(as_list(flags)) do table.insert(xs, f) end
+                table.mserge(xs, as_list(flags))
                 return self
             end,
 
             cxx_flags = function(self, flags)
                 local xs = ensure_field(self.opts, 'cxx_flags', {})
-                for _, f in ipairs(as_list(flags)) do table.insert(xs, f) end
+                table.mserge(xs, as_list(flags))
                 return self
             end,
 
             ld_flags = function(self, flags)
                 local xs = ensure_field(self.opts, 'ld_flags', {})
-                for _, f in ipairs(as_list(flags)) do table.insert(xs, f) end
+                table.mserge(xs, as_list(flags))
                 return self
             end,
         }
