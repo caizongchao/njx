@@ -56,7 +56,7 @@ var ninja_build_dir = 'build/ninja/'; {
     if (!fs.existsSync(ninja_build_dir)) fs.mkdirSync(ninja_build_dir);
 }
 
-var ninja_cc = `cosmoc++ ${OPT} -c -Ideps/ninja/src -D__BUILD_LIB__ `
+var ninja_cc = `cosmoc++ -std=c++20 ${OPT} -Ideps/ninja/src -D__BUILD_LIB__ -c `
 
 function is_up_to_date(src, dst) {
     try {

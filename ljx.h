@@ -1,6 +1,7 @@
 #ifndef __ljx_326793b9ae35409dad7f48b241b79c8f
 #define __ljx_326793b9ae35409dad7f48b241b79c8f
 
+#include <stdio.h>
 #include <stdint.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -25,12 +26,14 @@ static inline bool info(const char * fmt, ...) {
     va_list args; va_start(args, fmt); vprintf(fmt, args); va_end(args); return true;
 }
 
+static inline bool halt() { exit(-1); return true; }
+
 static inline struct {
     template<typename T>
     void operator=(T && x) { if(failed(x)) fatal("operation failed"); }
 
     template<typename T>
-    constexpr bool operator==(T && x) { return failed(x); }
+    constexpr bool operator==(T && x) { return !failed(x); }
 
     template<typename T>
     auto operator()(T && x) { (*this) = std::forward<T>(x); return std::forward<T>(x); }

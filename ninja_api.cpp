@@ -45,9 +45,9 @@ struct reftable {
 
 lua_gcptr reftable_new(uint32_t size) {
     auto t = lua_table::make(size, 0);
-    
+
     auto rtab = reftable::from(t); rtab->size = 0; rtab->flist = reftable::NOFREE_REF;
-    
+
     return {t.value};
 }
 
@@ -310,7 +310,7 @@ void ninja_edge_add(lua_gcptr outputs, const char * rule_name, lua_gcptr inputs,
     // phony cycle check
     {
         auto x = edge->outputs_[0];
-        (std::find(edge->inputs_.begin(), edge->inputs_.end(), x) != edge->inputs_.end()) || fatal("phony target '%s' names itself as an input; ", x->path().c_str());
+        (std::find(edge->inputs_.begin(), edge->inputs_.end(), x) == edge->inputs_.end()) || fatal("phony target '%s' names itself as an input; ", x->path().c_str());
     }
 
     // dyndep
@@ -360,15 +360,13 @@ void ninja_build(lua_gcptr targets) {
         }
     }
 
-    if(paths.empty()) {
-        status.Info("no targets to build"); return;
-    }
+    !paths.empty() || fatal("no targets to build");
 
     $ninja.start_time_millis_ = GetTimeMillis();
 
-    ok == $ninja.EnsureBuildDirExists() || fatal("failed to create build directory");
-    ok == $ninja.OpenBuildLog() || fatal("failed to open build log");
-    ok == $ninja.OpenDepsLog() || fatal("failed to open deps log");
+    $ninja.EnsureBuildDirExists() || halt();
+    $ninja.OpenBuildLog() || halt();
+    $ninja.OpenDepsLog() || halt();
 
     if($ninja.RunBuild(paths.size(), (char **)paths.data(), &status) == 0) {
         $ninja.DumpMetrics();

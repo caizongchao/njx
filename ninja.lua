@@ -34,15 +34,15 @@ ffi.cdef [[
 
 local HOST_OS = ffi.string(C.host_os())
 
-local EXTENSION_NAME = {}; do
+local TARGET_EXTENSION = {}; do
     if HOST_OS == 'Windows' then
-        EXTENSION_NAME['binary'] = '.exe'
-        EXTENSION_NAME['shared'] = '.dll'
-        EXTENSION_NAME['static'] = '.lib'
+        TARGET_EXTENSION['binary'] = '.exe'
+        TARGET_EXTENSION['shared'] = '.dll'
+        TARGET_EXTENSION['static'] = '.lib'
     elseif HOST_OS == 'Linux' then
-        EXTENSION_NAME['binary'] = ''
-        EXTENSION_NAME['shared'] = '.so'
-        EXTENSION_NAME['static'] = '.a'
+        TARGET_EXTENSION['binary'] = ''
+        TARGET_EXTENSION['shared'] = '.so'
+        TARGET_EXTENSION['static'] = '.a'
     else
         fatal('unsupported platform: %s', HOST_OS)
     end
@@ -58,7 +58,7 @@ end
 
 function ninja.build_dir(dir)
     if not dir then
-        return C.ninja_var_get('builddir')
+        return ffi.string(C.ninja_var_get('builddir'))
     else
         C.ninja_var_set('builddir', dir)
     end
@@ -78,6 +78,28 @@ local function options_map(t, fx)
     table.mapk(t, function(k)
         if k == 'public' then return k else return fx(k) end
     end)
+end
+
+local function options_foreach(t, fx)
+    if t == nil then return end
+
+    for k, x in pairs(t) do
+        if k == 'public' then goto continue end
+
+        if type(k) == 'number' then
+            if type(x) == 'table' then
+                options_foreach(x, fx)
+            else
+                fx(x)
+            end
+        else
+            if x ~= false then
+                fx(k, x)
+            end
+        end
+
+        ::continue::
+    end
 end
 
 local function options_merge(tout, tin, ...)
@@ -252,25 +274,25 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
             c_flags = function(self, flags)
                 local xs = ensure_field(self.opts, 'c_flags', {})
-                table.mserge(xs, as_list(flags))
+                table.merge(xs, as_list(flags))
                 return self
             end,
 
             cx_flags = function(self, flags)
                 local xs = ensure_field(self.opts, 'cx_flags', {})
-                table.mserge(xs, as_list(flags))
+                table.merge(xs, as_list(flags))
                 return self
             end,
 
             cxx_flags = function(self, flags)
                 local xs = ensure_field(self.opts, 'cxx_flags', {})
-                table.mserge(xs, as_list(flags))
+                table.merge(xs, as_list(flags))
                 return self
             end,
 
             ld_flags = function(self, flags)
                 local xs = ensure_field(self.opts, 'ld_flags', {})
-                table.mserge(xs, as_list(flags))
+                table.merge(xs, as_list(flags))
                 return self
             end,
         }
@@ -288,15 +310,17 @@ local gcc_toolchain; gcc_toolchain = object({
             cxx = 'g++',
             ar = 'ar',
             ld = 'g++',
+            defaultlibs = {},
 
             prepare = function(self)
-                local build_dir = path.combine(ninja.build_dir(), self.name)
+                local s
 
-                local output = path.combine(build_dir, self.name .. EXTENSION_NAME[self.type])
+                local build_dir = path.combine(ninja.build_dir(), self.name); self.build_dir = build_dir
+                local output = path.combine(build_dir, self.name .. TARGET_EXTENSION[self.type]); self.output = output
 
                 local opts = self.opts
 
-                local c_option_fields = {'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'}
+                local c_option_fields = { 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
 
                 local c_options = options_merge({}, options_of(opts, unpack(c_option_fields)))
 
@@ -307,7 +331,7 @@ local gcc_toolchain; gcc_toolchain = object({
                     end
                 end
 
-                local cxx_option_fields = {'cxx_flags', 'cx_flags', 'defines', 'includes', 'include_dirs'}
+                local cxx_option_fields = { 'cxx_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
 
                 local cxx_options = options_merge({}, options_of(opts, unpack(cxx_option_fields)))
 
@@ -318,7 +342,7 @@ local gcc_toolchain; gcc_toolchain = object({
                     end
                 end
 
-                local ld_option_fields = {'ld_flags', 'libs', 'lib_dirs'}
+                local ld_option_fields = { 'ld_flags', 'libs', 'lib_dirs' }
 
                 local ld_options = options_merge({}, options_of(opts, unpack(ld_option_fields)))
 
@@ -331,11 +355,12 @@ local gcc_toolchain; gcc_toolchain = object({
 
                 local rules = {}
 
-                local rule_txt_output = ' -MMD -MF $out.d $in -c -o $out'
+                local rule_txt_output = '-MMD -MF $out.d -c $in -o $out'
 
                 local cc_rule_name = symgen(self.name .. '_cc_'); do
+                    s = string.concat(self.cc, ' ', options_to_string(c_options), rule_txt_output)
                     C.ninja_rule_add(cc_rule_name, {
-                        command = string.concat(self.cc, ' ', options_to_string(c_options), rule_txt_output),
+                        command = s,
                         depfile = '$out.d',
                         deps = 'gcc',
                         description = 'CC $out',
@@ -344,8 +369,9 @@ local gcc_toolchain; gcc_toolchain = object({
                 rules['.c'] = cc_rule_name
 
                 local cxx_rule_name = symgen(self.name .. '_cxx_'); do
+                    s = string.concat(self.cxx, ' ', options_to_string(cxx_options), rule_txt_output)
                     C.ninja_rule_add(cxx_rule_name, {
-                        command = string.concat(self.cxx, ' ', options_to_string(cxx_options), rule_txt_output),
+                        command = s,
                         depfile = '$out.d',
                         deps = 'gcc',
                         description = 'CXX $out',
@@ -356,22 +382,22 @@ local gcc_toolchain; gcc_toolchain = object({
                 rules['.cc'] = cxx_rule_name
 
                 local ld_rule_name = symgen(self.name .. '_ld_'); do
+                    s = string.concat(self.ld, pick(self.type == 'shared', ' -shared ', ' '), options_to_string(ld_options), ' $in -o $out')
                     C.ninja_rule_add(ld_rule_name, {
-                        command = string.concat(self.ld, ' ', options_to_string(ld_options), ' $in -o $out'),
+                        command = s,
                         description = 'LD $out',
                     })
                 end
 
                 local ar_rule_name = symgen(self.name .. '_ar_'); do
+                    s = string.concat(self.ar, ' ', ' rcs $out $in')
                     C.ninja_rule_add(ar_rule_name, {
-                        command = string.concat(self.ar, ' ',' rcs $out $in'),
+                        command = s,
                         description = 'AR $out',
                     })
                 end
 
-                local objs = {}
-
-                local srcs = opts.srcs; if srcs then
+                local objs = {}; local srcs = as_list(opts.srcs); do
                     local function add_src(src, rules)
                         local obj = path.combine(build_dir, src .. '.o')
 
@@ -395,18 +421,24 @@ local gcc_toolchain; gcc_toolchain = object({
                             local rules = {}
 
                             local cc_rule_name = symgen(self.name .. '_cc_'); do
+                                s = string.concat(self.cc, ' ',
+                                    options_to_string(options_merge({}, c_options,
+                                        options_of(opts, unpack(c_option_fields)))), rule_txt_output)
                                 C.ninja_rule_add(cc_rule_name, {
-                                    command = string.concat(self.cc, ' ', options_to_string(options_merge({}, c_options, options_of(opts, unpack(c_option_fields)))), rule_txt_output),
+                                    command = s,
                                     depfile = '$out.d',
                                     deps = 'gcc',
                                     description = 'CC $out',
                                 })
                             end
                             rules['.c'] = cc_rule_name
-            
+
                             local cxx_rule_name = symgen(self.name .. '_cxx_'); do
+                                s = string.concat(self.cxx, ' ',
+                                    options_to_string(options_merge({}, cxx_options,
+                                        options_of(opts, unpack(cxx_option_fields)))), rule_txt_output)
                                 C.ninja_rule_add(cxx_rule_name, {
-                                    command = string.concat(self.cxx, ' ', options_to_string(options_merge({}, cxx_options, options_of(opts, unpack(cxx_option_fields)))), rule_txt_output),
+                                    command = s,
                                     depfile = '$out.d',
                                     deps = 'gcc',
                                     description = 'CXX $out',
@@ -415,7 +447,7 @@ local gcc_toolchain; gcc_toolchain = object({
                             rules['.cpp'] = cxx_rule_name
                             rules['.cxx'] = cxx_rule_name
                             rules['.cc'] = cxx_rule_name
-            
+
                             for _, x in ipairs(src) do
                                 if path.is_wildcard(x) then
                                     fs.foreach(x, function(f)
@@ -426,10 +458,32 @@ local gcc_toolchain; gcc_toolchain = object({
                                 end
                             end
                         else
-                            add_src(src, rules)
+                            if path.is_wildcard(src) then
+                                fs.foreach(src, function(f)
+                                    add_src(f, rules)
+                                end)
+                            else
+                                add_src(src, rules)
+                            end
                         end
                     end
-                end
+                end; self.objs = objs
+
+                local deplibs = {}; options_foreach(self.opts.deps, function(dep)
+                    local tdep = ninja.targets[dep]
+
+                    if (tdep.type == 'shared') or (tdep.type == 'static') then
+                        table.insert(deplibs, tdep.output)
+                    end
+                end)
+
+                local libs = table.merge({}, self.defaultlibs, deplibs)
+
+                C.ninja_edge_add(output, pick(self.type == 'static', ar_rule_name, ld_rule_name), options_merge({}, objs, self.defaultlibs, deplibs), nil)
+            end,
+
+            build = function(self)
+                C.ninja_build(self.output)
             end,
         },
     },
@@ -469,7 +523,7 @@ local msvc_toolchain; msvc_toolchain = object({
 }); ninja.toolchains.msvc = msvc_toolchain
 
 function ninja.target(toolchain, name, type, opts)
-    return ninja[toolchain].target.new(name, type, opts)
+    return ninja.toolchains[toolchain].target.new(name, type, opts)
 end
 
 local function target_walk(target, fx)
@@ -488,5 +542,3 @@ function ninja.target_foreach(fx)
     -- clear visited flag
     for _, target in pairs(ninja.targets) do target.visited = nil end
 end
-
-

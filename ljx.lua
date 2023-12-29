@@ -32,6 +32,10 @@ local function buffer_indent(buf, indent)
     return buffer_rep(buf, ' ', indent)
 end
 
+local function pick(cond, a, b)
+    if cond then return a else return b end
+end; _G.pick = pick
+
 local function uuid(len)
     local buf = __buf:reset(); len = len or 32
     for i = 1, len do
@@ -188,7 +192,7 @@ setmetatable(table, {
 local function string_concat(...)
     local c = select('#', ...)
     local buf = __buf:reset(); for i = 1, c do
-        buf:put(select(i, ...))
+        local s = select(i, ...); buf:put(s)
     end
     return buf:tostring()
 end
@@ -210,6 +214,7 @@ end
 
 setmetatable(string, {
     __index = {
+        concat = string_concat,
         split = string_split,
         starts_with = string_starts_with,
         ends_with = string_ends_with,
