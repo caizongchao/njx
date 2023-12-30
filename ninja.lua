@@ -496,7 +496,9 @@ local gcc_toolchain; gcc_toolchain = object({
                 if not self.configured then
                     self:configure()
                 end
-                C.ninja_build(self.output)
+                if self.output then
+                    C.ninja_build(self.output)
+                end
             end,
         },
     },
