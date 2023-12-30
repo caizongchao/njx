@@ -2,10 +2,13 @@ local jit_v = require("jit.v"); jit_v.on()
 
 require('ninja')
 
-local target = ninja.target('gcc', 'foo', 'binary', {
+local target = ninja.target('foo', {
+    toolchain = 'cosmocc',
     srcs = 'test/*.cpp'
 })
 
-target:prepare()
-target:build()
+print(inspect(target))
+
+-- target:prepare()
+-- target:build()
 

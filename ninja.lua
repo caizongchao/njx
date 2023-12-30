@@ -196,9 +196,9 @@ end
 
 local basic_cc_toolchain; basic_cc_toolchain = object({
     target = {
-        new = function(name, type, opts)
+        new = function(name, opts)
             local target = inherits(basic_cc_toolchain.target.basic, {
-                name = name, type = type, opts = opts or {},
+                name = name, opts = table.merge({ type = 'binary' }, opts)
             })
             ninja.targets[name] = target
             return target
@@ -312,13 +312,15 @@ local gcc_toolchain; gcc_toolchain = object({
             ld = 'g++',
             defaultlibs = {},
 
-            prepare = function(self)
-                local s
+            configured = false,
+
+            configure = function(self)
+                if self.configured then return end
+
+                local s; local opts = self.opts
 
                 local build_dir = path.combine(ninja.build_dir(), self.name); self.build_dir = build_dir
-                local output = path.combine(build_dir, self.name .. TARGET_EXTENSION[self.type]); self.output = output
-
-                local opts = self.opts
+                local output = path.combine(build_dir, self.name .. TARGET_EXTENSION[opts.type]); self.output = output
 
                 local c_option_fields = { 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
 
@@ -382,7 +384,8 @@ local gcc_toolchain; gcc_toolchain = object({
                 rules['.cc'] = cxx_rule_name
 
                 local ld_rule_name = symgen(self.name .. '_ld_'); do
-                    s = string.concat(self.ld, pick(self.type == 'shared', ' -shared ', ' '), options_to_string(ld_options), ' $in -o $out')
+                    s = string.concat(self.ld, pick(opts.type == 'shared', ' -shared ', ' '),
+                        options_to_string(ld_options), ' $in -o $out')
                     C.ninja_rule_add(ld_rule_name, {
                         command = s,
                         description = 'LD $out',
@@ -469,7 +472,7 @@ local gcc_toolchain; gcc_toolchain = object({
                     end
                 end; self.objs = objs
 
-                local deplibs = {}; options_foreach(self.opts.deps, function(dep)
+                local deplibs = {}; options_foreach(opts.deps, function(dep)
                     local tdep = ninja.targets[dep]
 
                     if (tdep.type == 'shared') or (tdep.type == 'static') then
@@ -479,10 +482,20 @@ local gcc_toolchain; gcc_toolchain = object({
 
                 local libs = table.merge({}, self.defaultlibs, deplibs)
 
-                C.ninja_edge_add(output, pick(self.type == 'static', ar_rule_name, ld_rule_name), options_merge({}, objs, self.defaultlibs, deplibs), nil)
+                C.ninja_edge_add(output, pick(opts.type == 'static', ar_rule_name, ld_rule_name),
+                    options_merge({}, objs, self.defaultlibs, deplibs), nil)
+
+                if opts.default ~= false then
+                    C.ninja_default_add(output)
+                end
+
+                self.configured = true
             end,
 
             build = function(self)
+                if not self.configured then
+                    self:configure()
+                end
                 C.ninja_build(self.output)
             end,
         },
@@ -492,10 +505,14 @@ local gcc_toolchain; gcc_toolchain = object({
 local cosmocc_toolchain; cosmocc_toolchain = object({
     target = {
         new = function(...)
-            return extends(basic_cc_toolchain.target.new(...), cosmocc_toolchain.target.basic)
+            return extends(gcc_toolchain.target.new(...), cosmocc_toolchain.target.basic)
         end,
 
         basic = {
+            cc = 'cosmocc',
+            cxx = 'cosmoc++',
+            ar = 'cosmoar',
+            ld = 'cosmoc++',
         },
     },
 }); ninja.toolchains.cosmocc = cosmocc_toolchain
@@ -503,10 +520,14 @@ local cosmocc_toolchain; cosmocc_toolchain = object({
 local clang_toolchain; clang_toolchain = object({
     target = {
         new = function(...)
-            return extends(basic_cc_toolchain.target.new(...), clang_toolchain.target.basic)
+            return extends(gcc_toolchain.target.new(...), clang_toolchain.target.basic)
         end,
 
         basic = {
+            cc = 'clang',
+            cxx = 'clang++',
+            ar = 'llvm-ar',
+            ld = 'clang++',
         },
     },
 }); ninja.toolchains.clang = clang_toolchain
@@ -522,23 +543,50 @@ local msvc_toolchain; msvc_toolchain = object({
     },
 }); ninja.toolchains.msvc = msvc_toolchain
 
-function ninja.target(toolchain, name, type, opts)
-    return ninja.toolchains[toolchain].target.new(name, type, opts)
+if HOST_OS == 'Windows' then
+    ninja.toolchain = 'msvc'
+else
+    ninja.toolchain = 'gcc'
 end
 
-local function target_walk(target, fx)
-    if target.visited then return end
+local function toolchain_of(x)
+    if type(x) == 'string' then
+        return ninja.toolchains[x]
+    elseif x == nil then
+        return ninja.toolchain
+    else
+        return x
+    end
+end; ninja.toolchain_of = toolchain_of
+
+function ninja.target(name, opts)
+    opts = opts or {}; if not opts.toolchain then
+        opts.toolchain = ninja.toolchain
+    end
+    return ninja.toolchain_of(opts.toolchain).target.new(name, opts)
+end
+
+local function target_walk(target, fx, ctx)
+    if ctx[target] then return end
     if target.opts.deps then
-        for _, dep in ipairs(target.opts.deps) do target_walk(dep, fx) end
+        options_foreach(target.opts.deps, function(dep)
+            target_walk(dep, fx, ctx)
+        end)
     end
-    target.visited = true; fx(target)
+    ctx[target] = true; fx(target)
 end
 
-function ninja.target_foreach(fx)
-    -- walk all targets
-    for _, target in pairs(ninja.targets) do
-        target_walk(target, fx)
+function ninja.targets_foreach(targets, fx)
+    if type(targets) == 'function' then
+        fx = targets; targets = ninja.targets
     end
-    -- clear visited flag
-    for _, target in pairs(ninja.targets) do target.visited = nil end
+    options_foreach(targets, function(target)
+        target_walk(target, fx, {})
+    end)
+end
+
+function ninja.build(targets)
+    ninja.targets_foreach(targets, function(target)
+        target:build()
+    end)
 end

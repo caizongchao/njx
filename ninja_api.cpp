@@ -360,8 +360,6 @@ void ninja_build(lua_gcptr targets) {
         }
     }
 
-    !paths.empty() || fatal("no targets to build");
-
     $ninja.start_time_millis_ = GetTimeMillis();
 
     $ninja.EnsureBuildDirExists() || halt();
