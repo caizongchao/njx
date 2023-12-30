@@ -295,22 +295,12 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 table.merge(xs, as_list(flags))
                 return self
             end,
-        }
-    },
-});
 
-local gcc_toolchain; gcc_toolchain = object({
-    target = {
-        new = function(...)
-            return extends(basic_cc_toolchain.target.new(...), gcc_toolchain.target.basic)
-        end,
+            default_libs = {},
 
-        basic = {
-            cc = 'gcc',
-            cxx = 'g++',
-            ar = 'ar',
-            ld = 'g++',
-            defaultlibs = {},
+            rule_postfix = '',
+
+            dep_type = '',
 
             configured = false,
 
@@ -357,25 +347,26 @@ local gcc_toolchain; gcc_toolchain = object({
 
                 local rules = {}
 
-                local rule_txt_output = '-MMD -MF $out.d -c $in -o $out'
+                local rule_postfix = self.rule_postfix
+                local dep_type = self.dep_type
 
                 local cc_rule_name = symgen(self.name .. '_cc_'); do
-                    s = string.concat(self.cc, ' ', options_to_string(c_options), rule_txt_output)
+                    s = string.concat(self.cc, ' ', options_to_string(c_options), rule_postfix)
                     C.ninja_rule_add(cc_rule_name, {
                         command = s,
                         depfile = '$out.d',
-                        deps = 'gcc',
+                        deps = dep_type,
                         description = 'CC $out',
                     })
                 end
                 rules['.c'] = cc_rule_name
 
                 local cxx_rule_name = symgen(self.name .. '_cxx_'); do
-                    s = string.concat(self.cxx, ' ', options_to_string(cxx_options), rule_txt_output)
+                    s = string.concat(self.cxx, ' ', options_to_string(cxx_options), rule_postfix)
                     C.ninja_rule_add(cxx_rule_name, {
                         command = s,
                         depfile = '$out.d',
-                        deps = 'gcc',
+                        deps = dep_type,
                         description = 'CXX $out',
                     })
                 end
@@ -426,11 +417,11 @@ local gcc_toolchain; gcc_toolchain = object({
                             local cc_rule_name = symgen(self.name .. '_cc_'); do
                                 s = string.concat(self.cc, ' ',
                                     options_to_string(options_merge({}, c_options,
-                                        options_of(opts, unpack(c_option_fields)))), rule_txt_output)
+                                        options_of(opts, unpack(c_option_fields)))), rule_postfix)
                                 C.ninja_rule_add(cc_rule_name, {
                                     command = s,
                                     depfile = '$out.d',
-                                    deps = 'gcc',
+                                    deps = dep_type,
                                     description = 'CC $out',
                                 })
                             end
@@ -439,11 +430,11 @@ local gcc_toolchain; gcc_toolchain = object({
                             local cxx_rule_name = symgen(self.name .. '_cxx_'); do
                                 s = string.concat(self.cxx, ' ',
                                     options_to_string(options_merge({}, cxx_options,
-                                        options_of(opts, unpack(cxx_option_fields)))), rule_txt_output)
+                                        options_of(opts, unpack(cxx_option_fields)))), rule_postfix)
                                 C.ninja_rule_add(cxx_rule_name, {
                                     command = s,
                                     depfile = '$out.d',
-                                    deps = 'gcc',
+                                    deps = dep_type,
                                     description = 'CXX $out',
                                 })
                             end
@@ -480,10 +471,10 @@ local gcc_toolchain; gcc_toolchain = object({
                     end
                 end)
 
-                local libs = table.merge({}, self.defaultlibs, deplibs)
+                local libs = table.merge({}, self.default_libs, deplibs)
 
                 C.ninja_edge_add(output, pick(opts.type == 'static', ar_rule_name, ld_rule_name),
-                    options_merge({}, objs, self.defaultlibs, deplibs), nil)
+                    options_merge({}, objs, self.default_libs, deplibs), nil)
 
                 if opts.default ~= false then
                     C.ninja_default_add(output)
@@ -500,6 +491,24 @@ local gcc_toolchain; gcc_toolchain = object({
                     C.ninja_build(self.output)
                 end
             end,
+        }
+    },
+});
+
+local gcc_toolchain; gcc_toolchain = object({
+    target = {
+        new = function(...)
+            return extends(basic_cc_toolchain.target.new(...), gcc_toolchain.target.basic)
+        end,
+
+        basic = {
+            cc = 'gcc',
+            cxx = 'g++',
+            ar = 'ar',
+            ld = 'g++',
+
+            rule_postfix = '-MMD -MF $out.d -c $in -o $out',
+            dep_type = 'gcc',
         },
     },
 }); ninja.toolchains.gcc = gcc_toolchain
@@ -541,6 +550,16 @@ local msvc_toolchain; msvc_toolchain = object({
         end,
 
         basic = {
+            cc = 'cl',
+            cxx = 'cl',
+            ar = 'lib',
+            ld = 'link',
+
+            rule_postfix = '/showIncludes /nologo /c /Fo$out /Fd$out.pdb /TP $in',
+            dep_type = 'msvc',
+
+            default_libs = { 'kernel32.lib', 'user32.lib', 'gdi32.lib', 'winspool.lib', 'shell32.lib',
+                'ole32.lib', 'oleaut32.lib', 'uuid.lib', 'comdlg32.lib', 'advapi32.lib' },
         },
     },
 }); ninja.toolchains.msvc = msvc_toolchain
