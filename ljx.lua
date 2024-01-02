@@ -1,17 +1,33 @@
+---@diagnostic disable: deprecated, undefined-field
 require('table.new'); require('table.clear')
 
 local ffi = require('ffi'); local C = ffi.C
+local jit_v = require("jit.v"); jit_v.on()
 
 _G.ffi = ffi; _G.C = C
+
+ffi.cdef [[
+    void debug(gcptr x);
+
+    gctab reftable_new(uint32_t size);
+    int reftable_ref(gcptr t, gcptr x);
+    void reftable_unref(gcptr t, int r);
+
+    int timer_add(int ms, int fx, int repeat);
+    void timer_remove(int id);
+    int timer_update(gcptr xs);
+]]
+
+local ON, OFF = true, false; _G.ON = ON; _G.OFF = OFF
+local YES, NO = true, false; _G.YES = YES; _G.NO = NO
+
+local ok, yes = assert, assert; _G.ok = ok; _G.yes = yes
 
 local __counter = -1
 
 local function __counter_next()
     __counter = __counter + 1; return __counter
 end; _G.__counter_next = __counter_next
-
-local ON, OFF = true, false; _G.ON = ON; _G.OFF = OFF
-local YES, NO = true, false; _G.YES = YES; _G.NO = NO
 
 local rand = math.random
 
@@ -265,6 +281,7 @@ end; _G.trace = trace
 
 ffi.cdef [[
     typedef void* HANDLE;
+    typedef void* LPVOID;
     typedef unsigned int UINT;
     typedef wchar_t WCHAR;
     typedef WCHAR* LPWSTR;
@@ -272,8 +289,11 @@ ffi.cdef [[
     typedef char* LPSTR;
     typedef const char* LPCSTR;
     typedef uint32_t DWORD;
+    typedef DWORD* LPDWORD;
     typedef int BOOL;
     typedef BOOL* LPBOOL;
+    typedef uint32_t ULONG;
+    typedef ULONG * ULONG_PTR;
     typedef struct {
         DWORD dwLowDateTime;
         DWORD dwHighDateTime;
@@ -292,7 +312,24 @@ ffi.cdef [[
         wchar_t cAlternateFileName[14];
     } WIN32_FIND_DATAW;
 
+    typedef struct _OVERLAPPED {
+        ULONG_PTR Internal;
+        ULONG_PTR InternalHigh;
+        union {
+          struct {
+            DWORD Offset;
+            DWORD OffsetHigh;
+          } DUMMYSTRUCTNAME;
+          LPVOID Pointer;
+        } DUMMYUNIONNAME;
+        HANDLE    hEvent;
+    } OVERLAPPED, *LPOVERLAPPED;
+
+    typedef void (* LPOVERLAPPED_COMPLETION_ROUTINE)(DWORD dwErrorCode, DWORD dwNumberOfBytesTransfered, LPOVERLAPPED lpOverlapped);
+
     static const int CSTR_EQUAL = 2;
+
+    int GetLastError();
 
     UINT MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCSTR lpMultiByteStr, int cbMultiByte, LPWSTR lpWideCharStr, int cchWideChar);
     UINT WideCharToMultiByte(UINT CodePage, DWORD dwFlags, LPCWSTR lpWideCharStr, int cchWideChar, LPSTR lpMultiByteStr, int cbMultiByte, LPCSTR lpDefaultChar, LPBOOL lpUsedDefaultChar);
@@ -305,9 +342,27 @@ ffi.cdef [[
     DWORD GetFileAttributesW(LPCWSTR lpFileName);
 
     int CompareStringW(DWORD Locale, DWORD dwCmpFlags, LPWSTR lpString1, int cchCount1, LPWSTR lpString2, int cchCount2);
+
+    BOOL ReadDirectoryChangesW(
+        HANDLE hDirectory,
+        LPVOID lpBuffer,
+        DWORD nBufferLength,
+        BOOL bWatchSubtree,
+        DWORD dwNotifyFilter,
+        LPDWORD lpBytesReturned,
+        LPOVERLAPPED lpOverlapped,
+        LPOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine);
+
+    intptr_t CreateIoCompletionPort(intptr_t FileHandle, intptr_t ExistingCompletionPort, intptr_t CompletionKey, int NumberOfConcurrentThreads);
+    int GetQueuedCompletionStatus(intptr_t CompletionPort, intptr_t * lpNumberOfBytes, intptr_t * lpCompletionKey, intptr_t * lpOverlapped, int dwMilliseconds);
+    int PostQueuedCompletionStatus(intptr_t CompletionPort, intptr_t dwNumberOfBytesTransferred, intptr_t dwCompletionKey, intptr_t lpOverlapped);
 ]]
 
 local kernel32 = ffi.load('kernel32')
+
+local CreateIoCompletionPort = kernel32.CreateIoCompletionPort
+local GetQueuedCompletionStatus = kernel32.GetQueuedCompletionStatus
+local PostQueuedCompletionStatus = kernel32.PostQueuedCompletionStatus
 
 local __wstr = ffi.new('WCHAR[?]', 16 * 1024)
 local __str = ffi.new('char[?]', 16 * 1024)
@@ -563,3 +618,137 @@ do
     end
     _G.fs = fs
 end
+
+local reftable_new = C.reftable_new
+local reftable_ref = C.reftable_ref
+local reftable_unref = C.reftable_unref
+
+-- registry
+local registry; registry = object({
+    new = function(size)
+        local t = reftable_new(size or 1024); setmetatable(t, { __index = registry }); return t
+    end,
+
+    register = function(self, x)
+        return reftable_ref(self, x)
+    end,
+
+    unregister = function(self, i)
+        reftable_unref(self, i)
+    end,
+}); _G.registry = registry
+
+-- events
+local __events = {}
+
+local function on(name, fx)
+    local x = __events[name]; if x == nil then
+        __events[name] = fx; return 1
+    else
+        if type(x) == 'table' then
+            table.insert(x, fx); return #x
+        else
+            __events[name] = { x, fx }; return 2
+        end
+    end
+end; _G.on = on
+
+local function off(name, i)
+    if (i == 0) or type(__events[name] ~= 'table') then
+        __events[name] = nil; return
+    end
+    __events[name][i] = nil
+end; _G.off = off
+
+local function emit(name, ...)
+    local x = __events[name]; if x ~= nil then
+        if type(x) ~= 'table' then
+            x(...)
+        else
+            for _, fx in ipairs(x) do
+                fx(...)
+            end
+        end
+    end
+end; _G.emit = emit
+
+-- timer
+local timer_add = C.timer_add
+local timer_remove = C.timer_remove
+local timer_update = C.timer_update
+
+local timer_registry = registry.new()
+
+local function set_timeout(ms, fx)
+    local i; i = timer_registry:register(function()
+        fx(); timer_registry:unregister(i);
+    end)
+    return timer_add(ms, i, 0)
+end; _G.set_timeout = set_timeout
+
+local function set_interval(ms, fx)
+    return timer_add(ms, timer_registry:register(fx), 1)
+end; _G.set_interval = set_interval
+
+local function clear_timeout(id)
+    timer_remove(id); timer_registry:unregister(id)
+end; _G.clear_timeout = clear_timeout
+
+local __timeouts = table.new(32, 0)
+
+local function update_timer()
+    local c = timer_update(__timeouts); if c == 0 then
+        return
+    end
+    for i = 0, c - 1 do
+        timer_registry[__timeouts[i]]()
+    end
+end
+
+-- IOCP
+local IOCP = CreateIoCompletionPort(-1, 0, 0, 0); ok(IOCP ~= 0)
+
+local iocp_registry = registry.new()
+
+local function iocp_on_complete(i)
+    local x = iocp_registry[i]
+    if type(x) == "function" then
+        x()
+    else -- if t == "table" then
+        emit(x[1], unpack(x, 2))
+    end
+    iocp_registry:unregister(i)
+end
+
+local lpNumberOfBytes = ffi.new("intptr_t[1]")
+local lpCompletionKey = ffi.new("intptr_t[1]")
+local lpOverlapped = ffi.new("intptr_t[1]")
+
+local function run()
+    local timeout = 8; while true do
+        if (GetQueuedCompletionStatus(IOCP, lpNumberOfBytes, lpCompletionKey, lpOverlapped, timeout) ~= 0) then
+            iocp_on_complete(tonumber(lpOverlapped[0]));
+        else
+            update_timer()
+        end
+    end
+end; _G.run = run
+
+local function post(x)
+    local i = iocp_registry:register(x); PostQueuedCompletionStatus(IOCP, 0, 0, i)
+end; _G.post = post
+
+local function poll()
+    while (GetQueuedCompletionStatus(IOCP, lpNumberOfBytes, lpCompletionKey, lpOverlapped, 0) ~= 0) do
+        iocp_on_complete(tonumber(lpOverlapped[0]));
+    end
+    update_timer()
+end; _G.poll = poll
+
+post(function()
+    print('hello world')
+end)
+set_interval(1000, function()
+    print('tick')
+end)
+run()

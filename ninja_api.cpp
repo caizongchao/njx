@@ -11,6 +11,7 @@
 
 #include "ljx.h"
 #include "ljxx.h"
+#include "dyn.h"
 
 #include <filesystem>
 
@@ -57,6 +58,28 @@ int reftable_ref(lua_table t, lua_gcptr x) {
 
 void reftable_unref(lua_table t, int r) {
     auto rtab = reftable::from(t); return rtab->unref(r);
+}
+
+static dtimer $timer;
+
+int timer_add(int ms, int fx, int repeat) { return $timer.add(ms, fx, repeat); }
+
+void timer_remove(int id) { $timer.remove(id); }
+
+int timer_update(lua_table xs) {
+    int c = 0; auto ts = (double *)xs.array();
+
+    $timer.update([&](auto it_begin, auto it_end) {
+        for(auto it = it_begin; it != it_end; ++it) {
+            if(xs.ensure_asize(c + 1) != -1) {
+                ts = (double *)xs.array();
+            }
+
+            ts[c] = it->second->value; ++c;
+        }
+    });
+    
+    return c;
 }
 
 static const char * DEFAULT_BUILD_DIR = "build";
@@ -571,6 +594,11 @@ static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path) 
     return true;
 }
 
+void debug(lua_table x) {
+    printf("%p\n", x.value);
+    //  __asm__ volatile("int $0x03");
+}
+
 const char * host_os() {
     if(IsWindows()) return "Windows"; else return "Linux";
 }
@@ -582,10 +610,14 @@ struct clib_sym_t {
 #define CLIB_SYM(name) { #name, (void *)(name) }
 
 static clib_sym_t __clib_syms[] = {
+    CLIB_SYM(debug),
     CLIB_SYM(host_os),
     CLIB_SYM(reftable_new),
     CLIB_SYM(reftable_ref),
     CLIB_SYM(reftable_unref),
+    CLIB_SYM(timer_add),
+    CLIB_SYM(timer_remove),
+    CLIB_SYM(timer_update),
     CLIB_SYM(ninja_config_get),
     CLIB_SYM(ninja_config_apply),
     CLIB_SYM(ninja_reset),

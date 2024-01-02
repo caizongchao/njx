@@ -607,6 +607,9 @@ function ninja.targets_foreach(targets, fx)
 end
 
 function ninja.build(targets)
+    if targets == nil then
+        targets = ninja.targets
+    end
     ninja.targets_foreach(targets, function(target)
         target:build()
     end)

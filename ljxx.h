@@ -138,11 +138,25 @@ struct lua_table {
 
     size_t asize() const { return value->asize; }
 
+    lua_table & reasize(size_t asize);
+
+    size_t ensure_asize(size_t asize) {
+        if(value->asize >= asize) return -1;
+
+        size_t nasize = value->asize; while(nasize < asize) {
+            nasize *= 2;
+        }
+
+        reasize(nasize); return nasize;
+    }
+
     operator GCtab *() const { return value; }
 
     operator bool() const { return value != nullptr; }
 
     bool empty() const { return !value || (lj_tab_len(value) == 0); }
+
+    lua_table & clear() { lj_tab_clear(value); return *this; }
 
     lua_table & operator=(lua_table const & x) { value = x.value; return *this; }
 
@@ -512,5 +526,7 @@ inline lua_table & lua_table::def(const GCstr * name, lua_value const & x) {
 }
 
 inline lua_table & lua_table::push(lua_value const & x) { *lj_tab_setint($L, value, lj_tab_len(value) + 1) = x.value; return *this; }
+
+inline lua_table & lua_table::reasize(size_t asize) { lj_tab_reasize($L, value, asize); return *this; }
 
 #endif // ljxx_ac444ba0f14f422f9e50be80caa40bca
