@@ -539,42 +539,11 @@ local function path_do_compbine(buf, ...)
         vargs_foreach(path_do_pathappend, ...)
     end
     return buffer_tostring(__buf)
-
-    -- print('###########', #s, s)
-
-    -- return s
-
-    -- local c = select('#', ...); if c == 0 then
-    --     return buf:tostring()
-    -- end
-
-    -- for i = 1, c do
-    --     local path = select(i, ...); if path then
-    --         buf:put(path)
-
-    --         if (i ~= c) and (not path:match('[/\\]', -1)) then
-    --             buf:put('/')
-    --         end
-    --     end
-    -- end
-
-    -- return buf:tostring()
 end
 
 local function path_combine(...)
     return path_do_compbine(__buf:reset(), ...)
 end
--- local function path_combine(path1, path2, ...)
---     if not path2 then return path1 end
-
---     if not path1 then
---         return path_combine(path2, ...)
---     elseif path1:match('[/\\]', -1) then
---         return path_combine(path1 .. path2, ...)
---     else
---         return path_combine(path1 .. '/' .. path2, ...)
---     end
--- end
 
 local function path_ftype(path)
     local attrs = GetFileAttributesW(u82w(path))
@@ -876,9 +845,9 @@ local function fs_watch(dir, fx)
         0)
 end; fs.watch = fs_watch
 
-fs_watch('r:/temp', function(fname)
-    printf('file changed-->: %s\n', fname)
-end)
+-- fs_watch('r:/temp', function(fname)
+--     printf('file changed-->: %s\n', fname)
+-- end)
 
 -- post(function()
 --     print('hello world')

@@ -17,7 +17,7 @@ ffi.cdef [[
     } ninja_config_t;
 
     const char * host_os();
-    void * ninja_config_get();
+    ninja_config_t * ninja_config_get();
     void ninja_config_apply();
     void ninja_reset();
     void ninja_clear();
@@ -53,7 +53,7 @@ local ninja = {}; _G.ninja = ninja
 ninja.targets = {}; ninja.toolchains = {}
 
 function ninja.config(fx)
-    if fx(C.ninja_config()) ~= false then C.ninja_config_apply() end
+    if fx(C.ninja_config_get()) ~= false then C.ninja_config_apply() end
 end
 
 function ninja.build_dir(dir)
@@ -606,11 +606,23 @@ function ninja.targets_foreach(targets, fx)
     end)
 end
 
-function ninja.build(targets)
+function ninja.build(targets, opts)
+    local configure = opts and opts.configure
+
     if targets == nil then
         targets = ninja.targets
     end
+    
     ninja.targets_foreach(targets, function(target)
+        if configure then
+            target:configure()
+        end
         target:build()
+    end)
+end
+
+function ninja.watch(dir, targets, opts)
+    fs.watch(dir, function ()
+        ninja.build(targets, opts)
     end)
 end

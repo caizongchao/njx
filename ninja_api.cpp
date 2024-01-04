@@ -613,17 +613,11 @@ void buffer_pathappend(lua_gcptr buf, lua_gcptr path) {
     }
 
     lj_buf_putstr(sbuf, s);
-
-
-auto sbufx = (SBufExt *)sbuf;
-
-printf("===> %p, %.*s\n", sbufx, sbufxlen(sbufx), sbufx->r);
 }
 
 lua_gcptr buffer_tostring(lua_gcptr buf) {
     auto sbufx = (SBufExt *)buf; return {lua_string(sbufx->r, sbufxlen(sbufx))};
 }
-
 
 struct clib_sym_t {
     const char * name; void * sym;
