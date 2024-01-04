@@ -13,6 +13,7 @@ extern "C" {
 #include <lj_obj.h>
 #include <lj_tab.h>
 #include <lj_str.h>
+#include <lj_buf.h>
 #include <lj_udata.h>
 #include <lj_cdata.h>
 #include <lj_state.h>
@@ -251,11 +252,17 @@ struct lua_string {
 
     lua_string(GCstr * value) : value(value) {}
 
+    lua_string(const char * s) : lua_string(lua_value(s)) {}
+
+    lua_string(const char * s, size_t len) : lua_string(lua_value(std::string_view(s, len))) {}
+
     lua_string(lua_value const & t) { this->value = tvisstr(t) ? strV(t) : nullptr; }
 
     lua_string(lua_string const &) = default;
 
     operator GCstr *() const { return value; }
+
+    operator GCobj *() const { return (GCobj *)value; }
 
     operator bool() const { return value != nullptr; }
 
@@ -308,6 +315,12 @@ struct lua_gcptr {
     }
 
     operator lua_value() const { return tvalue(); }
+
+    operator SBuf * () const { return (SBuf *)uddata(&value->ud); }
+
+    operator SBufExt * () const { return (SBufExt *)uddata(&value->ud); }
+
+    operator lua_string() const { return as_string(); }
 
     template<typename F>
     void for_pairs(F && f) const {

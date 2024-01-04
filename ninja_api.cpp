@@ -67,18 +67,16 @@ int timer_add(int ms, int fx, int repeat) { return $timer.add(ms, fx, repeat); }
 void timer_remove(int id) { $timer.remove(id); }
 
 int timer_update(lua_table xs) {
-    int c = 0; auto ts = (double *)xs.array();
+    int c = 0; $timer.update([&](auto it_begin, auto it_end) {
+        c = std::distance(it_begin, it_end); xs.ensure_asize(c);
 
-    $timer.update([&](auto it_begin, auto it_end) {
+        auto ts = (double *)xs.array(); int i = 0;
+
         for(auto it = it_begin; it != it_end; ++it) {
-            if(xs.ensure_asize(c + 1) != -1) {
-                ts = (double *)xs.array();
-            }
-
-            ts[c] = it->second->value; ++c;
+            ts[i++] = it->second->value;
         }
     });
-    
+
     return c;
 }
 
@@ -594,14 +592,38 @@ static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path) 
     return true;
 }
 
-void debug(lua_table x) {
-    printf("%p\n", x.value);
+void debug(lua_gcptr x) {
+    SBuf * sbuf = x;
+
+    printf("aaa: %p, %.*s\n", sbuf, sbuflen(sbuf), sbuf->b);
     //  __asm__ volatile("int $0x03");
 }
 
 const char * host_os() {
     if(IsWindows()) return "Windows"; else return "Linux";
 }
+
+void buffer_pathappend(lua_gcptr buf, lua_gcptr path) {
+    SBuf * sbuf = buf; lua_string s = path;
+
+    int len = sbuflen(sbuf); if(len > 0) {
+        int c = sbuf->b[len - 1]; if(c != '/' && c != '\\') {
+            lj_buf_putchar(sbuf, '/');
+        }
+    }
+
+    lj_buf_putstr(sbuf, s);
+
+
+auto sbufx = (SBufExt *)sbuf;
+
+printf("===> %p, %.*s\n", sbufx, sbufxlen(sbufx), sbufx->r);
+}
+
+lua_gcptr buffer_tostring(lua_gcptr buf) {
+    auto sbufx = (SBufExt *)buf; return {lua_string(sbufx->r, sbufxlen(sbufx))};
+}
+
 
 struct clib_sym_t {
     const char * name; void * sym;
@@ -611,7 +633,10 @@ struct clib_sym_t {
 
 static clib_sym_t __clib_syms[] = {
     CLIB_SYM(debug),
+    CLIB_SYM(printf),
     CLIB_SYM(host_os),
+    CLIB_SYM(buffer_pathappend),
+    CLIB_SYM(buffer_tostring),
     CLIB_SYM(reftable_new),
     CLIB_SYM(reftable_ref),
     CLIB_SYM(reftable_unref),

@@ -9,6 +9,11 @@ _G.ffi = ffi; _G.C = C
 ffi.cdef [[
     void debug(gcptr x);
 
+    void printf(const char* fmt, ...);
+
+    void buffer_pathappend(gcptr buf, gcptr path);
+    gcstr buffer_tostring(gcptr buf);
+
     gctab reftable_new(uint32_t size);
     int reftable_ref(gcptr t, gcptr x);
     void reftable_unref(gcptr t, int r);
@@ -18,10 +23,24 @@ ffi.cdef [[
     int timer_update(gcptr xs);
 ]]
 
+local printf = C.printf
+
 local ON, OFF = true, false; _G.ON = ON; _G.OFF = OFF
 local YES, NO = true, false; _G.YES = YES; _G.NO = NO
 
 local ok, yes = assert, assert; _G.ok = ok; _G.yes = yes
+
+local function vargs_foreach(fx, ...)
+    local c = select('#', ...); if c == 0 then
+        return
+    end
+
+    for i = 1, c do
+        local v = select(i, ...); if v ~= nil then
+            fx(v)
+        end
+    end
+end; _G.vargs_foreach = vargs_foreach
 
 local __counter = -1
 
@@ -36,6 +55,9 @@ local seed = os.time(); math.randomseed(seed)
 
 local buffer = require('string.buffer'); _G.buffer = buffer
 local __buf = buffer.new(); _G.__buf = __buf
+
+local buffer_pathappend = C.buffer_pathappend
+local buffer_tostring = C.buffer_tostring
 
 local function buffer_rep(buf, str, n)
     for i = 1, n do
@@ -323,28 +345,37 @@ ffi.cdef [[
           LPVOID Pointer;
         } DUMMYUNIONNAME;
         HANDLE    hEvent;
+        int data;
     } OVERLAPPED, *LPOVERLAPPED;
 
-    typedef void (* LPOVERLAPPED_COMPLETION_ROUTINE)(DWORD dwErrorCode, DWORD dwNumberOfBytesTransfered, LPOVERLAPPED lpOverlapped);
+    typedef struct _FILE_NOTIFY_INFORMATION {
+        DWORD NextEntryOffset;
+        DWORD Action;
+        DWORD FileNameLength;
+        WCHAR FileName[1];
+    } FILE_NOTIFY_INFORMATION, *PFILE_NOTIFY_INFORMATION;
 
-    static const int CSTR_EQUAL = 2;
+    typedef void (* LPOVERLAPPED_COMPLETION_ROUTINE)(DWORD dwErrorCode, DWORD dwNumberOfBytesTransfered, LPOVERLAPPED lpOverlapped);
 
     int GetLastError();
 
     UINT MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCSTR lpMultiByteStr, int cbMultiByte, LPWSTR lpWideCharStr, int cchWideChar);
     UINT WideCharToMultiByte(UINT CodePage, DWORD dwFlags, LPCWSTR lpWideCharStr, int cchWideChar, LPSTR lpMultiByteStr, int cbMultiByte, LPCSTR lpDefaultChar, LPBOOL lpUsedDefaultChar);
 
-    HANDLE FindFirstFileW(const wchar_t* lpFileName, WIN32_FIND_DATAW* lpFindFileData);
-    int FindNextFileW(HANDLE hFindFile, WIN32_FIND_DATAW* lpFindFileData);
-    int FindClose(HANDLE hFindFile);
+    int CreateEventW(LPVOID lpEventAttributes, BOOL bManualReset, BOOL bInitialState, LPCWSTR lpName);
+
+    int CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPVOID lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, int hTemplateFile);
+    BOOL CloseHandle(int hObject);
+
+    int FindFirstFileW(const wchar_t* lpFileName, WIN32_FIND_DATAW* lpFindFileData);
+    int FindNextFileW(int hFindFile, WIN32_FIND_DATAW* lpFindFileData);
+    int FindClose(int hFindFile);
 
     DWORD GetFileAttributesA(LPCSTR lpFileName);
     DWORD GetFileAttributesW(LPCWSTR lpFileName);
 
-    int CompareStringW(DWORD Locale, DWORD dwCmpFlags, LPWSTR lpString1, int cchCount1, LPWSTR lpString2, int cchCount2);
-
     BOOL ReadDirectoryChangesW(
-        HANDLE hDirectory,
+        int hDirectory,
         LPVOID lpBuffer,
         DWORD nBufferLength,
         BOOL bWatchSubtree,
@@ -353,12 +384,38 @@ ffi.cdef [[
         LPOVERLAPPED lpOverlapped,
         LPOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine);
 
-    intptr_t CreateIoCompletionPort(intptr_t FileHandle, intptr_t ExistingCompletionPort, intptr_t CompletionKey, int NumberOfConcurrentThreads);
-    int GetQueuedCompletionStatus(intptr_t CompletionPort, intptr_t * lpNumberOfBytes, intptr_t * lpCompletionKey, intptr_t * lpOverlapped, int dwMilliseconds);
-    int PostQueuedCompletionStatus(intptr_t CompletionPort, intptr_t dwNumberOfBytesTransferred, intptr_t dwCompletionKey, intptr_t lpOverlapped);
+    int CreateIoCompletionPort(intptr_t FileHandle, intptr_t ExistingCompletionPort, intptr_t CompletionKey, int NumberOfConcurrentThreads);
+    int GetQueuedCompletionStatus(int CompletionPort, intptr_t * lpNumberOfBytes, intptr_t * lpCompletionKey, LPOVERLAPPED * lpOverlapped, int dwMilliseconds);
+    int PostQueuedCompletionStatus(int CompletionPort, intptr_t dwNumberOfBytesTransferred, intptr_t dwCompletionKey, intptr_t lpOverlapped);
 ]]
 
 local kernel32 = ffi.load('kernel32')
+
+local INVALID_HANDLE_VALUE = -1
+
+local GetLastError = kernel32.GetLastError
+
+local MultiByteToWideChar = kernel32.MultiByteToWideChar
+local WideCharToMultiByte = kernel32.WideCharToMultiByte
+
+local CreateEventW = kernel32.CreateEventW
+
+local FILE_ATTRIBUTE_DIRECTORY = 0x00000010
+
+local CreateFileW = kernel32.CreateFileW
+local CloseHandle = kernel32.CloseHandle
+
+local GetFileAttributesA = kernel32.GetFileAttributesA
+local GetFileAttributesW = kernel32.GetFileAttributesW
+
+local find_dataw = ffi.new('WIN32_FIND_DATAW[1]')
+
+local FindFirstFileW = kernel32.FindFirstFileW
+local FindNextFileW = kernel32.FindNextFileW
+local FindClose = kernel32.FindClose
+
+local FILE_NOTIFY_CHANGE_LAST_WRITE = 0x00000010
+local ReadDirectoryChangesW = kernel32.ReadDirectoryChangesW
 
 local CreateIoCompletionPort = kernel32.CreateIoCompletionPort
 local GetQueuedCompletionStatus = kernel32.GetQueuedCompletionStatus
@@ -368,20 +425,16 @@ local __wstr = ffi.new('WCHAR[?]', 16 * 1024)
 local __str = ffi.new('char[?]', 16 * 1024)
 
 local function u82w(str)
-    local len = kernel32.MultiByteToWideChar(65001, 0, str, -1, nil, 0)
-    kernel32.MultiByteToWideChar(65001, 0, str, -1, __wstr, len)
+    local len = MultiByteToWideChar(65001, 0, str, -1, nil, 0)
+    MultiByteToWideChar(65001, 0, str, -1, __wstr, len)
     return __wstr
 end
 
 local function w2u8(wstr)
-    local len = kernel32.WideCharToMultiByte(65001, 0, wstr, -1, nil, 0, nil, nil)
-    kernel32.WideCharToMultiByte(65001, 0, wstr, -1, __str, len, nil, nil)
+    local len = WideCharToMultiByte(65001, 0, wstr, -1, nil, 0, nil, nil)
+    WideCharToMultiByte(65001, 0, wstr, -1, __str, len, nil, nil)
     return ffi.string(__str)
 end
-
-
-local INVALID_HANDLE_VALUE = ffi.cast('HANDLE', -1)
-local find_dataw = ffi.new('WIN32_FIND_DATAW[1]')
 
 local function path_quote(path)
     return '"' .. path .. '"'
@@ -477,20 +530,54 @@ local function path_exclusions(path)
     return path, exclusions
 end
 
-local function path_combine(path1, path2, ...)
-    if not path2 then return path1 end
-
-    if not path1 then
-        return path_combine(path2, ...)
-    elseif path1:match('[/\\]', -1) then
-        return path_combine(path1 .. path2, ...)
-    else
-        return path_combine(path1 .. '/' .. path2, ...)
-    end
+local function path_do_pathappend(path)
+    buffer_pathappend(__buf, path)
 end
 
+local function path_do_compbine(buf, ...)
+    __buf:reset(); do
+        vargs_foreach(path_do_pathappend, ...)
+    end
+    return buffer_tostring(__buf)
+
+    -- print('###########', #s, s)
+
+    -- return s
+
+    -- local c = select('#', ...); if c == 0 then
+    --     return buf:tostring()
+    -- end
+
+    -- for i = 1, c do
+    --     local path = select(i, ...); if path then
+    --         buf:put(path)
+
+    --         if (i ~= c) and (not path:match('[/\\]', -1)) then
+    --             buf:put('/')
+    --         end
+    --     end
+    -- end
+
+    -- return buf:tostring()
+end
+
+local function path_combine(...)
+    return path_do_compbine(__buf:reset(), ...)
+end
+-- local function path_combine(path1, path2, ...)
+--     if not path2 then return path1 end
+
+--     if not path1 then
+--         return path_combine(path2, ...)
+--     elseif path1:match('[/\\]', -1) then
+--         return path_combine(path1 .. path2, ...)
+--     else
+--         return path_combine(path1 .. '/' .. path2, ...)
+--     end
+-- end
+
 local function path_ftype(path)
-    local attrs = kernel32.GetFileAttributesW(u82w(path))
+    local attrs = GetFileAttributesW(u82w(path))
     if attrs ~= 0xFFFFFFFF then
         if bit.band(attrs, 0x10) ~= 0 then
             return 'directory'
@@ -544,7 +631,7 @@ local function directory_walk(path, opts)
 
     local stack = { path }; while #stack > 0 do
         local dir = stack[#stack]; stack[#stack] = nil
-        local handle = kernel32.FindFirstFileW(u82w(path_combine(dir, wildcard)), find_dataw)
+        local handle = FindFirstFileW(u82w(path_combine(dir, wildcard)), find_dataw)
         if handle ~= INVALID_HANDLE_VALUE then
             repeat
                 local filename = w2u8(find_dataw[0].cFileName)
@@ -574,8 +661,8 @@ local function directory_walk(path, opts)
 
                     ::next::
                 end
-            until kernel32.FindNextFileW(handle, find_dataw) == 0
-            kernel32.FindClose(handle)
+            until FindNextFileW(handle, find_dataw) == 0
+            FindClose(handle)
         end
     end
 end
@@ -710,24 +797,30 @@ local IOCP = CreateIoCompletionPort(-1, 0, 0, 0); ok(IOCP ~= 0)
 
 local iocp_registry = registry.new()
 
-local function iocp_on_complete(i)
-    local x = iocp_registry[i]
-    if type(x) == "function" then
+local function iocp_on_complete(completionKey, overlapped)
+    local i; if overlapped ~= nil then
+        i = overlapped.data
+    else
+        i = tonumber(completionKey)
+    end
+
+    local x = iocp_registry[i]; if type(x) == "function" then
         x()
-    else -- if t == "table" then
+    else -- t == "table"
         emit(x[1], unpack(x, 2))
     end
+
     iocp_registry:unregister(i)
 end
 
-local lpNumberOfBytes = ffi.new("intptr_t[1]")
-local lpCompletionKey = ffi.new("intptr_t[1]")
-local lpOverlapped = ffi.new("intptr_t[1]")
+local iocp_lpNumberOfBytes = ffi.new("intptr_t[1]")
+local iocp_lpCompletionKey = ffi.new("intptr_t[1]")
+local iocp_lpOverlapped = ffi.new("LPOVERLAPPED[1]")
 
 local function run()
     local timeout = 8; while true do
-        if (GetQueuedCompletionStatus(IOCP, lpNumberOfBytes, lpCompletionKey, lpOverlapped, timeout) ~= 0) then
-            iocp_on_complete(tonumber(lpOverlapped[0]));
+        if (GetQueuedCompletionStatus(IOCP, iocp_lpNumberOfBytes, iocp_lpCompletionKey, iocp_lpOverlapped, timeout) ~= 0) then
+            iocp_on_complete(iocp_lpCompletionKey[0], iocp_lpOverlapped[0]);
         else
             update_timer()
         end
@@ -735,20 +828,66 @@ local function run()
 end; _G.run = run
 
 local function post(x)
-    local i = iocp_registry:register(x); PostQueuedCompletionStatus(IOCP, 0, 0, i)
+    local i = iocp_registry:register(x); PostQueuedCompletionStatus(IOCP, 0, i, 0)
 end; _G.post = post
 
 local function poll()
-    while (GetQueuedCompletionStatus(IOCP, lpNumberOfBytes, lpCompletionKey, lpOverlapped, 0) ~= 0) do
-        iocp_on_complete(tonumber(lpOverlapped[0]));
+    while (GetQueuedCompletionStatus(IOCP, iocp_lpNumberOfBytes, iocp_lpCompletionKey, iocp_lpOverlapped, 0) ~= 0) do
+        iocp_on_complete(iocp_lpCompletionKey[0], iocp_lpOverlapped[0]);
     end
     update_timer()
 end; _G.poll = poll
 
-post(function()
-    print('hello world')
+-- fs watch file changes
+local function fs_watch(dir, fx)
+    local hdir = CreateFileW(u82w(dir), 0x0001, 0x0007, nil, 3, 0x42000000, 0); ok(hdir ~= INVALID_HANDLE_VALUE)
+    local h = CreateIoCompletionPort(hdir, IOCP, 0, 0); ok(h == IOCP)
+
+    local BUFFER_SIZE = 16 * 1024
+
+    local buf = ffi.new("char[?]", BUFFER_SIZE)
+    local lpBytesReturned = ffi.new("DWORD[1]")
+    local lpOverlapped = ffi.new("OVERLAPPED[1]")
+
+    local overlapped = lpOverlapped[0]
+
+    local on_change; on_change = function()
+        local p = buf; while true do
+            local info = ffi.cast("FILE_NOTIFY_INFORMATION*", p)
+            local filename = w2u8(info.FileName)
+            if filename ~= '.' and filename ~= '..' then
+                fx(path.combine(dir, filename))
+            end
+            if info.NextEntryOffset == 0 then
+                break
+            end
+            p = p + info.NextEntryOffset
+        end
+
+        overlapped.data = iocp_registry:register(on_change)
+
+        ok(ReadDirectoryChangesW(hdir, buf, BUFFER_SIZE, 1, FILE_NOTIFY_CHANGE_LAST_WRITE, lpBytesReturned, lpOverlapped,
+            nil) ~= 0)
+    end
+
+    overlapped.data = iocp_registry:register(on_change)
+
+    ok(ReadDirectoryChangesW(hdir, buf, BUFFER_SIZE, 1, FILE_NOTIFY_CHANGE_LAST_WRITE, lpBytesReturned, lpOverlapped, nil) ~=
+        0)
+end; fs.watch = fs_watch
+
+fs_watch('r:/temp', function(fname)
+    printf('file changed-->: %s\n', fname)
 end)
-set_interval(1000, function()
-    print('tick')
-end)
+
+-- post(function()
+--     print('hello world')
+-- end)
+
+-- set_interval(1000, function()
+--     C.printf('tick\n')
+-- end)
+
+-- C.printf('===> %s\n', 'hello world')
+
 run()
