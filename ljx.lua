@@ -859,4 +859,4 @@ end; fs.watch = fs_watch
 
 -- C.printf('===> %s\n', 'hello world')
 
-run()
+-- run()

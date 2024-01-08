@@ -181,6 +181,8 @@ local function options_of(t, ...)
             end
         end
     end
+
+    return r
 end
 
 local options = {
@@ -208,6 +210,11 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
             deps = function(self, xs)
                 local deps = ensure_field(self.opts, 'deps', {})
                 table.merge(deps, as_list(xs))
+                return self
+            end,
+
+            type = function(self, type)
+                self.opts.type = type
                 return self
             end,
 
@@ -376,7 +383,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local ld_rule_name = symgen(self.name .. '_ld_'); do
                     s = string.concat(self.ld, pick(opts.type == 'shared', ' -shared ', ' '),
-                        options_to_string(ld_options), ' $in -o $out')
+                        options_to_string(ld_options), ' ', options_to_string(self.default_libs), ' $in -o $out')
                     C.ninja_rule_add(ld_rule_name, {
                         command = s,
                         description = 'LD $out',
@@ -384,7 +391,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 end
 
                 local ar_rule_name = symgen(self.name .. '_ar_'); do
-                    s = string.concat(self.ar, ' ', ' rcs $out $in')
+                    s = string.concat(self.ar, ' ', ' $out $in')
                     C.ninja_rule_add(ar_rule_name, {
                         command = s,
                         description = 'AR $out',
@@ -471,10 +478,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     end
                 end)
 
-                local libs = table.merge({}, self.default_libs, deplibs)
-
                 C.ninja_edge_add(output, pick(opts.type == 'static', ar_rule_name, ld_rule_name),
-                    options_merge({}, objs, self.default_libs, deplibs), nil)
+                    options_merge({}, objs, deplibs), nil)
 
                 if opts.default ~= false then
                     C.ninja_default_add(output)
@@ -504,11 +509,20 @@ local gcc_toolchain; gcc_toolchain = object({
         basic = {
             cc = 'gcc',
             cxx = 'g++',
-            ar = 'ar',
+            ar = 'ar rcs',
             ld = 'g++',
 
             rule_postfix = '-MMD -MF $out.d -c $in -o $out',
             dep_type = 'gcc',
+
+            std = function(self, std)
+                if std.c then
+                    self:c_flags('-std=' .. std.c)
+                elseif std.cxx then
+                    self:cxx_flags('-std=' .. std.cxx)
+                end
+                return self
+            end,
         },
     },
 }); ninja.toolchains.gcc = gcc_toolchain
@@ -522,7 +536,7 @@ local cosmocc_toolchain; cosmocc_toolchain = object({
         basic = {
             cc = 'cosmocc',
             cxx = 'cosmoc++',
-            ar = 'cosmoar',
+            ar = 'cosmoar rcs',
             ld = 'cosmoc++',
         },
     },
@@ -537,7 +551,7 @@ local clang_toolchain; clang_toolchain = object({
         basic = {
             cc = 'clang',
             cxx = 'clang++',
-            ar = 'llvm-ar',
+            ar = 'llvm-ar rcs',
             ld = 'clang++',
         },
     },
@@ -558,8 +572,16 @@ local msvc_toolchain; msvc_toolchain = object({
             rule_postfix = '/showIncludes /nologo /c /Fo$out /Fd$out.pdb /TP $in',
             dep_type = 'msvc',
 
-            default_libs = { 'kernel32.lib', 'user32.lib', 'gdi32.lib', 'winspool.lib', 'shell32.lib',
-                'ole32.lib', 'oleaut32.lib', 'uuid.lib', 'comdlg32.lib', 'advapi32.lib' },
+            default_libs = { 'kernel32.lib' },
+
+            std = function(self, std)
+                if std.c then
+                    self:c_flags('/std:' .. std.c)
+                elseif std.cxx then
+                    self:cxx_flags('/std:' .. std.cxx)
+                end
+                return self
+            end,
         },
     },
 }); ninja.toolchains.msvc = msvc_toolchain
@@ -626,3 +648,5 @@ function ninja.watch(dir, targets, opts)
         ninja.build(targets, opts)
     end)
 end
+
+return ninja
