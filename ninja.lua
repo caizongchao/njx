@@ -225,17 +225,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 return (v == nil) and x or (x .. v)
             end,
 
-            make_command = function(self, cmd, opts)
-                local x = self.command_map[cmd]; if x == nil then
-                    x = cmd
-                else
-                    if type(x) == 'function' then
-                        return x(self, opts)
-                    end
-                end
-                return (opts == nil) and x or string.concat(x, ' ', options_tostring(opts))
-            end,
-
             deps = function(self, xs)
                 local deps = ensure_field(self.opts, 'deps', {})
                 table.merge(deps, as_list(xs))
@@ -382,7 +371,9 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local s; local opts = self.opts
 
                 local build_dir = path.combine(ninja.build_dir(), self.name); self.build_dir = build_dir
-                local output = path.combine(build_dir, self.name .. TARGET_EXTENSION[opts.type]); self.output = output
+                
+                -- local output = path.combine(build_dir, self.name .. TARGET_EXTENSION[opts.type]); self.output = output
+                local output = path.combine(ninja.build_dir(), self.name .. TARGET_EXTENSION[opts.type]); self.output = output
 
                 local c_option_fields = { 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
 
@@ -417,6 +408,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     end
                 end
 
+                local ar_options = options_merge({}, options_pick(opts, 'ar_flags'))
+
                 local rules = {}
 
                 local rule_postfix = self.rule_postfix
@@ -424,7 +417,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local cc_rule_name = symgen(self.name .. '_cc_'); do
                     C.ninja_rule_add(cc_rule_name, {
-                        command = options_tostring(self.cc, ' ', c_options),
+                        command = options_tostring(self.cc, c_options),
                         depfile = '$out.d',
                         deps = dep_type,
                         description = 'CC $out',
@@ -434,7 +427,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local cxx_rule_name = symgen(self.name .. '_cxx_'); do
                     C.ninja_rule_add(cxx_rule_name, {
-                        command = options_tostring(self.cxx, ' ', cxx_options),
+                        command = options_tostring(self.cxx, cxx_options),
                         depfile = '$out.d',
                         deps = dep_type,
                         description = 'CXX $out',
@@ -453,7 +446,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local ar_rule_name = symgen(self.name .. '_ar_'); do
                     C.ninja_rule_add(ar_rule_name, {
-                        command = options_tostring(self.ar, self.ar_flags),
+                        command = options_tostring(self.ar, ar_options),
                         description = 'AR $out',
                     })
                 end
@@ -582,12 +575,6 @@ local gcc_toolchain; gcc_toolchain = object({
                 lib_dir = '-L',
                 lib = '-l',
                 shared = '-shared',
-            },
-
-            command_map = {
-                cc = function(self, opts)
-                    return options_tostring(self.cc, opts)
-                end,
             },
         },
     },
