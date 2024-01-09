@@ -143,33 +143,40 @@ local function options_public_merge(tout, tin, ...)
     return options_public_merge(tout, ...)
 end
 
-local function options_to_buf(buf, t)
-    for k, x in pairs(t) do
-        if k == 'public' then
-            goto continue
-        elseif type(k) == 'number' then
-            if type(x) == 'table' then
-                options_to_buf(buf, x)
+local function options_tobuf(buf, t)
+    if type(t) ~= 'table' then
+        buf:put(t, ' ')
+    else
+        for k, x in pairs(t) do
+            if k == 'public' then
+                goto continue
+            elseif type(k) == 'number' then
+                if type(x) == 'table' then
+                    options_tobuf(buf, x)
+                else
+                    buf:put(x, ' ')
+                end
+            elseif type(x) == 'boolean' then
+                if x == true then
+                    buf:put(k, ' ')
+                end
             else
-                buf:put(x, ' ')
+                buf:put(k, '=', x, ' ')
             end
-        elseif type(x) == 'boolean' then
-            if x == true then
-                buf:put(k, ' ')
-            end
-        else
-            buf:put(k, '=', x, ' ')
+            ::continue::
         end
-        ::continue::
     end
     return buf
 end
 
-local function options_to_string(t)
-    return options_to_buf(__buf:reset(), t):tostring()
+local function options_tostring(...)
+    local buf = __buf:reset(); vargs_foreach(function(x)
+        options_tobuf(buf, x)
+    end, ...)
+    return buf:tostring()
 end
 
-local function options_of(t, ...)
+local function options_pick(t, ...)
     local c = select('#', ...)
     local r = {}
 
@@ -188,8 +195,8 @@ end
 local options = {
     merge = options_merge,
     public_merge = options_public_merge,
-    to_string = options_to_string,
-    of = options_of,
+    to_string = options_tostring,
+    pick = options_pick,
 }; _G.options = options
 
 local function symgen(prefix)
@@ -207,6 +214,28 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
         end,
 
         basic = {
+            make_flag = function(self, k, v)
+                local x = self.flag_map[k]; if x == nil then
+                    x = self.flag_switch .. k
+                else
+                    if type(x) == 'function' then
+                        return x(v)
+                    end
+                end
+                return (v == nil) and x or (x .. v)
+            end,
+
+            make_command = function(self, cmd, opts)
+                local x = self.command_map[cmd]; if x == nil then
+                    x = cmd
+                else
+                    if type(x) == 'function' then
+                        return x(self, opts)
+                    end
+                end
+                return (opts == nil) and x or string.concat(x, ' ', options_tostring(opts))
+            end,
+
             deps = function(self, xs)
                 local deps = ensure_field(self.opts, 'deps', {})
                 table.merge(deps, as_list(xs))
@@ -214,7 +243,37 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
             end,
 
             type = function(self, type)
-                self.opts.type = type
+                self.opts.type = type; if type == 'shared' then
+                    self:ld_flags(self:make_flag('shared'))
+                end
+                return self
+            end,
+
+            std = function(self, x)
+                local cstd, cxxstd
+
+                if type(x) == 'string' then
+                    if x:starts_with('c++') then
+                        cxxstd = x
+                    else
+                        cstd = x
+                    end
+                else
+                    if x.c then
+                        cstd = x.c
+                    elseif x.cxx then
+                        cxxstd = x.cxx
+                    end
+                end
+
+                if cstd then
+                    self:c_flags(self:make_flag('std', cstd))
+                end
+
+                if cxxstd then
+                    self:cxx_flags(self:make_flag('std', cxxstd))
+                end
+
                 return self
             end,
 
@@ -303,6 +362,12 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 return self
             end,
 
+            ar_flags = function(self, flags)
+                local xs = ensure_field(self.opts, 'ar_flags', {})
+                table.merge(xs, as_list(flags))
+                return self
+            end,
+
             default_libs = {},
 
             rule_postfix = '',
@@ -321,34 +386,34 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local c_option_fields = { 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
 
-                local c_options = options_merge({}, options_of(opts, unpack(c_option_fields)))
+                local c_options = options_merge({}, options_pick(opts, unpack(c_option_fields)))
 
                 if opts.deps then
                     for _, dep in ipairs(opts.deps) do
                         local opts = dep.opts
-                        options_public_merge(c_options, options_of(opts, unpack(c_option_fields)))
+                        options_public_merge(c_options, options_pick(opts, unpack(c_option_fields)))
                     end
                 end
 
                 local cxx_option_fields = { 'cxx_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
 
-                local cxx_options = options_merge({}, options_of(opts, unpack(cxx_option_fields)))
+                local cxx_options = options_merge({}, options_pick(opts, unpack(cxx_option_fields)))
 
                 if opts.deps then
                     for _, dep in ipairs(opts.deps) do
                         local opts = dep.opts
-                        options_public_merge(cxx_options, options_of(opts, unpack(cxx_option_fields)))
+                        options_public_merge(cxx_options, options_pick(opts, unpack(cxx_option_fields)))
                     end
                 end
 
                 local ld_option_fields = { 'ld_flags', 'libs', 'lib_dirs' }
 
-                local ld_options = options_merge({}, options_of(opts, unpack(ld_option_fields)))
+                local ld_options = options_merge({}, options_pick(opts, unpack(ld_option_fields)))
 
                 if opts.deps then
                     for _, dep in ipairs(opts.deps) do
                         local opts = dep.opts
-                        options_public_merge(ld_options, options_of(opts, unpack(ld_option_fields)))
+                        options_public_merge(ld_options, options_pick(opts, unpack(ld_option_fields)))
                     end
                 end
 
@@ -358,9 +423,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local dep_type = self.dep_type
 
                 local cc_rule_name = symgen(self.name .. '_cc_'); do
-                    s = string.concat(self.cc, ' ', options_to_string(c_options), rule_postfix)
                     C.ninja_rule_add(cc_rule_name, {
-                        command = s,
+                        command = options_tostring(self.cc, ' ', c_options),
                         depfile = '$out.d',
                         deps = dep_type,
                         description = 'CC $out',
@@ -369,9 +433,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 rules['.c'] = cc_rule_name
 
                 local cxx_rule_name = symgen(self.name .. '_cxx_'); do
-                    s = string.concat(self.cxx, ' ', options_to_string(cxx_options), rule_postfix)
                     C.ninja_rule_add(cxx_rule_name, {
-                        command = s,
+                        command = options_tostring(self.cxx, ' ', cxx_options),
                         depfile = '$out.d',
                         deps = dep_type,
                         description = 'CXX $out',
@@ -382,18 +445,15 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 rules['.cc'] = cxx_rule_name
 
                 local ld_rule_name = symgen(self.name .. '_ld_'); do
-                    s = string.concat(self.ld, pick(opts.type == 'shared', ' -shared ', ' '),
-                        options_to_string(ld_options), ' ', options_to_string(self.default_libs), ' $in -o $out')
                     C.ninja_rule_add(ld_rule_name, {
-                        command = s,
+                        command = options_tostring(self.ld, ld_options, self.default_libs),
                         description = 'LD $out',
                     })
                 end
 
                 local ar_rule_name = symgen(self.name .. '_ar_'); do
-                    s = string.concat(self.ar, ' ', ' $out $in')
                     C.ninja_rule_add(ar_rule_name, {
-                        command = s,
+                        command = options_tostring(self.ar, self.ar_flags),
                         description = 'AR $out',
                     })
                 end
@@ -422,11 +482,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                             local rules = {}
 
                             local cc_rule_name = symgen(self.name .. '_cc_'); do
-                                s = string.concat(self.cc, ' ',
-                                    options_to_string(options_merge({}, c_options,
-                                        options_of(opts, unpack(c_option_fields)))), rule_postfix)
                                 C.ninja_rule_add(cc_rule_name, {
-                                    command = s,
+                                    command = options_tostring(self.cc, options_merge({}, c_options, options_pick(opts, unpack(c_option_fields)))),
                                     depfile = '$out.d',
                                     deps = dep_type,
                                     description = 'CC $out',
@@ -435,11 +492,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                             rules['.c'] = cc_rule_name
 
                             local cxx_rule_name = symgen(self.name .. '_cxx_'); do
-                                s = string.concat(self.cxx, ' ',
-                                    options_to_string(options_merge({}, cxx_options,
-                                        options_of(opts, unpack(cxx_option_fields)))), rule_postfix)
                                 C.ninja_rule_add(cxx_rule_name, {
-                                    command = s,
+                                    command = options_tostring(self.cxx, options_merge({}, cxx_options, options_pick(opts, unpack(cxx_option_fields)))),
                                     depfile = '$out.d',
                                     deps = dep_type,
                                     description = 'CXX $out',
@@ -503,26 +557,38 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 local gcc_toolchain; gcc_toolchain = object({
     target = {
         new = function(...)
-            return extends(basic_cc_toolchain.target.new(...), gcc_toolchain.target.basic)
+            local t = extends(basic_cc_toolchain.target.new(...), gcc_toolchain.target.basic); do
+                t:cx_flags('-MMD -MF $out.d -o $out -c $in')
+                t:ld_flags('$in -o $out')
+                t:ar_flags('rcs $out $in')
+            end
+            return t
         end,
 
         basic = {
             cc = 'gcc',
             cxx = 'g++',
-            ar = 'ar rcs',
+            ar = 'ar',
             ld = 'g++',
 
-            rule_postfix = '-MMD -MF $out.d -c $in -o $out',
             dep_type = 'gcc',
 
-            std = function(self, std)
-                if std.c then
-                    self:c_flags('-std=' .. std.c)
-                elseif std.cxx then
-                    self:cxx_flags('-std=' .. std.cxx)
-                end
-                return self
-            end,
+            flag_switch = '-',
+
+            flag_map = {
+                std = '-std=',
+                include_dir = '-I',
+                include = '-include ',
+                lib_dir = '-L',
+                lib = '-l',
+                shared = '-shared',
+            },
+
+            command_map = {
+                cc = function(self, opts)
+                    return options_tostring(self.cc, opts)
+                end,
+            },
         },
     },
 }); ninja.toolchains.gcc = gcc_toolchain
@@ -536,7 +602,7 @@ local cosmocc_toolchain; cosmocc_toolchain = object({
         basic = {
             cc = 'cosmocc',
             cxx = 'cosmoc++',
-            ar = 'cosmoar rcs',
+            ar = 'cosmoar',
             ld = 'cosmoc++',
         },
     },
@@ -551,7 +617,7 @@ local clang_toolchain; clang_toolchain = object({
         basic = {
             cc = 'clang',
             cxx = 'clang++',
-            ar = 'llvm-ar rcs',
+            ar = 'llvm-ar',
             ld = 'clang++',
         },
     },
@@ -560,7 +626,12 @@ local clang_toolchain; clang_toolchain = object({
 local msvc_toolchain; msvc_toolchain = object({
     target = {
         new = function(...)
-            return extends(basic_cc_toolchain.target.new(...), msvc_toolchain.target.basic)
+            local t = extends(basic_cc_toolchain.target.new(...), msvc_toolchain.target.basic); do
+                t:cx_flags('/showIncludes /nologo /c /Fo$out /Fd$out.pdb /TP $in')
+                t:ld_flags('$in /OUT:$out')
+                t:ar_flags('/OUT:$out $in')
+            end
+            return t
         end,
 
         basic = {
@@ -569,19 +640,20 @@ local msvc_toolchain; msvc_toolchain = object({
             ar = 'lib',
             ld = 'link',
 
-            rule_postfix = '/showIncludes /nologo /c /Fo$out /Fd$out.pdb /TP $in',
             dep_type = 'msvc',
 
             default_libs = { 'kernel32.lib' },
 
-            std = function(self, std)
-                if std.c then
-                    self:c_flags('/std:' .. std.c)
-                elseif std.cxx then
-                    self:cxx_flags('/std:' .. std.cxx)
-                end
-                return self
-            end,
+            flag_switch = '/',
+
+            flag_map = {
+                std = '/std:',
+                include_dir = '/I',
+                include = '/FI',
+                lib_dir = '/LIBPATH:',
+                lib = '',
+                shared = '/DLL',
+            },
         },
     },
 }); ninja.toolchains.msvc = msvc_toolchain

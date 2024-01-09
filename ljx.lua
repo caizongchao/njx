@@ -230,7 +230,9 @@ setmetatable(table, {
 local function string_concat(...)
     local c = select('#', ...)
     local buf = __buf:reset(); for i = 1, c do
-        local s = select(i, ...); buf:put(s)
+        local s = select(i, ...); if s ~= nil then
+            buf:put(s)
+        end
     end
     return buf:tostring()
 end
