@@ -2,7 +2,7 @@
 require('table.new'); require('table.clear')
 
 local ffi = require('ffi'); local C = ffi.C
-local jit_v = require("jit.v"); jit_v.on()
+-- local jit_v = require("jit.v"); jit_v.on()
 
 _G.ffi = ffi; _G.C = C
 

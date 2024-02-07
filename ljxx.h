@@ -316,9 +316,9 @@ struct lua_gcptr {
 
     operator lua_value() const { return tvalue(); }
 
-    operator SBuf * () const { return (SBuf *)uddata(&value->ud); }
+    operator SBuf *() const { return (SBuf *)uddata(&value->ud); }
 
-    operator SBufExt * () const { return (SBufExt *)uddata(&value->ud); }
+    operator SBufExt *() const { return (SBufExt *)uddata(&value->ud); }
 
     operator lua_string() const { return as_string(); }
 
@@ -384,12 +384,19 @@ struct lua_state {
 
     lua_state & push(lua_value const & x) { *L->top = x.value; incr_top(L); return *this; }
 
+    lua_state & pop(int n = 1) { L->top -= n; return *this; }
+
     int ref(lua_value const & x) { push(x); return luaL_ref(L, LUA_REGISTRYINDEX); }
 
     lua_state & unref(int x) { luaL_unref(L, LUA_REGISTRYINDEX, x); return *this; }
 
-    lua_state & require(std::string_view const & name) {
-        lua_getglobal(L, "require"); lua_pushlstring(L, name.data(), name.size()); lua_call(L, 1, 1); return *this;
+    lua_value require(std::string_view const & name) {
+        lua_getglobal(L, "require"); lua_pushlstring(L, name.data(), name.size()); lua_call(L, 1, 1); lua_value r = *--L->top; return r;
+    }
+
+    template<typename... T>
+    lua_state & load(T &&... args) {
+        (require(std::forward<T>(args)), ...); return *this;
     }
 
     lua_state & run(std::string_view const & code) {

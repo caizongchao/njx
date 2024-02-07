@@ -75,7 +75,7 @@ local function as_list(x)
 end
 
 local function options_map(t, fx)
-    table.mapk(t, function(k)
+    return table.mapk(t, function(k)
         if k == 'public' then return k else return fx(k) end
     end)
 end
