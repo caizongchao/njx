@@ -125,8 +125,11 @@ local function inherits(base, x)
     return x
 end; _G.inherits = inherits
 
-local function extends(o, x)
-    return inherits(x, o)
+local function extends(x, ...)
+    vargs_foreach(function(base)
+        inherits(base, x)
+    end, ...)
+    return x
 end; _G.extends = extends
 
 local function stacktrace(...)

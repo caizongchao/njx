@@ -424,25 +424,24 @@ inline lua_value::lua_value(GCcdata * c) { setcdataV($L, &value, c); }
 
 template<of_invokable F>
 lua_value::lua_value(F && f) {
-    typedef std::remove_reference_t<F> fx_type; typedef function_traits<fx_type> fx_traits;
+    typedef std::remove_reference_t<F> fx_type;
+    typedef function_traits<fx_type> fx_traits;
+    typedef std::array<lua_value, fx_traits::arity> argv_type;
 
     const size_t fx_size = sizeof(fx_type); const bool no_return = std::is_same_v<typename fx_traits::result, void>;
 
     lua_State * L = $L;
 
-    auto argc = lua_gettop(L); yes = (argc == fx_traits::arity);
-
-    typedef std::array<lua_value, fx_traits::arity> argv_type;
-
-    auto argvp = (argv_type *)(L->top - fx_traits::arity); argv_type & argv = *argvp;
-
     if constexpr((std::is_function_v<fx_type> || (fx_size == 1))) {
         lua_CFunction cf = [](lua_State * L) {
+            auto argc = lua_gettop(L); yes = (argc == fx_traits::arity);
+            argv_type const & argv = *(argv_type *)(L->top - fx_traits::arity);
+
             if constexpr(no_return) {
-                std::apply(((fx_type *)nullptr), argv); return 0;
+                std::apply(*((fx_type *)nullptr), argv); return 0;
             }
             else {
-                lua_value r = std::apply(((fx_type *)nullptr), argv); {
+                lua_value r = std::apply(*((fx_type *)nullptr), argv); {
                     $L.push(r);
                 }
 
@@ -454,6 +453,9 @@ lua_value::lua_value(F && f) {
     }
     else {
         lua_CFunction cf = [](lua_State * L) {
+            auto argc = lua_gettop(L); yes = (argc == fx_traits::arity);
+            argv_type const & argv = *(argv_type *)(L->top - fx_traits::arity);
+
             auto uv = (uint64_t *)curr_func(L)->c.upvalue;
 
             fx_type * f = (fx_type *)uv[1];
@@ -470,9 +472,7 @@ lua_value::lua_value(F && f) {
             }
         };
 
-        const bool is_trivial = std::is_trivially_destructible_v<fx_type>;
-
-        if constexpr(is_trivial) lua_pushcclosure(L, cf, 2); else lua_pushcclosure(L, cf, 3);
+        if constexpr(std::is_trivially_destructible_v<fx_type>) lua_pushcclosure(L, cf, 2); else lua_pushcclosure(L, cf, 3);
     }
 
     value = *--L->top;
@@ -488,7 +488,7 @@ lua_value::lua_value(F && f) {
 
             auto dtor = [](void * p) { delete(fx_type *)p; };
 
-            uv[2] = (uint64_t)(dtor);
+            uv[2] = (uint64_t)(void (*)(void *))(dtor);
         }
     }
 }

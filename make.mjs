@@ -175,6 +175,7 @@ var luajit_src = [
     "deps/luajit/src/lib_buffer.c",
     "deps/luajit/src/lib_init.c",
     // "deps/luajit/src/luajit.c",
+    "deps/luafilesystem/src/lfs.c",
 ];
 
 var luajit_build_dir = 'build/luajit/'; {

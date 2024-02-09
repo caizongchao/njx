@@ -203,12 +203,70 @@ local function symgen(prefix)
     return prefix .. tostring(__counter_next())
 end
 
+local setupaction_map = {
+    mkdir = {
+        run = function(dir)
+            fs.mkdir(dir)
+        end,
+
+        clean = function(dir)
+            fs.rmdir(dir)
+        end,
+    },
+
+    copy = {
+        run = function()
+        end,
+
+        clean = function()
+        end,
+    },
+
+    touch = {
+        run = function()
+        end,
+
+        clean = function()
+        end,
+    },
+}
+
+local function setupaction_foreach(x, fx)
+    if x == nil then return end
+
+    local t = type(x); if t == 'function' then
+        fx(x)
+    elseif t == 'table' then
+        local a = x[1]; if type(a) == 'table' then
+            for _, v in pairs(x) do
+                setupaction_foreach(v, fx)
+            end
+        else
+            fx(x)
+        end
+    end
+end
+
+local basic_toolchain; basic_toolchain = object({
+    target = {
+        basic = {
+            setup = function(self, ...)
+                local actions = ensure_field(self.opts, 'setup', {})
+                vargs_foreach(function(action)
+                    table.insert(actions, action)
+                end, ...)
+                return self
+            end,
+        },
+    }
+})
+
 local basic_cc_toolchain; basic_cc_toolchain = object({
     target = {
         new = function(name, opts)
-            local target = inherits(basic_cc_toolchain.target.basic, {
+            local target = extends({
                 name = name, opts = table.merge({ type = 'binary' }, opts)
-            })
+            }, basic_toolchain.target.basic, basic_cc_toolchain.target.basic)
             ninja.targets[name] = target
             return target
         end,
@@ -225,9 +283,11 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 return (v == nil) and x or (x .. v)
             end,
 
-            deps = function(self, xs)
+            deps = function(self, ...)
                 local deps = ensure_field(self.opts, 'deps', {})
-                table.merge(deps, as_list(xs))
+                vargs_foreach(function(xs)
+                    table.merge(deps, as_list(xs))
+                end, ...)
                 return self
             end,
 
@@ -266,94 +326,116 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 return self
             end,
 
-            src = function(self, src)
+            src = function(self, ...)
                 local srcs = ensure_field(self.opts, 'srcs', {})
-                table.merge(srcs, as_list(src))
+                vargs_foreach(function(src)
+                    table.merge(srcs, as_list(src))
+                end, ...)
                 return self
             end,
 
-            include_dir = function(self, dir)
+            include_dir = function(self, ...)
                 local dirs = ensure_field(self.opts, 'include_dirs', {})
-                table.merge(dirs, options_map(as_list(dir), function(x)
-                    if not x:starts_with('-I') then
-                        x = '-I' .. x
-                    end
-                    return x
-                end))
+                vargs_foreach(function(dir)
+                    table.merge(dirs, options_map(as_list(dir), function(x)
+                        if not x:starts_with('-I') then
+                            x = '-I' .. x
+                        end
+                        return x
+                    end))
+                end, ...)
                 return self
             end,
 
-            include = function(self, inc)
+            include = function(self, ...)
                 local incs = ensure_field(self.opts, 'includes', {})
-                table.merge(incs, options_map(as_list(inc), function(x)
-                    if not x:starts_with('-include ') then
-                        x = '-include ' .. x
-                    end
-                    return x
-                end))
+                vargs_foreach(function(inc)
+                    table.merge(incs, options_map(as_list(inc), function(x)
+                        if not x:starts_with('-include ') then
+                            x = '-include ' .. x
+                        end
+                        return x
+                    end))
+                end, ...)
                 return self
             end,
 
-            lib_dir = function(self, dir)
+            lib_dir = function(self, ...)
                 local dirs = ensure_field(self.opts, 'lib_dirs', {})
-                table.merge(dirs, options_map(as_list(dir), function(x)
-                    if not x:starts_with('-L') then
-                        x = '-L' .. x
-                    end
-                    return x
-                end))
+                vargs_foreach(function(dir)
+                    table.merge(dirs, options_map(as_list(dir), function(x)
+                        if not x:starts_with('-L') then
+                            x = '-L' .. x
+                        end
+                        return x
+                    end))
+                end, ...)
                 return self
             end,
 
-            lib = function(self, lib)
+            lib = function(self, ...)
                 local libs = ensure_field(self.opts, 'libs', {})
-                table.merge(libs, options_map(as_list(lib), function(x)
-                    if not x:starts_with('-l') then
-                        x = '-l' .. x
-                    end
-                    return x
-                end))
+                vargs_foreach(function(lib)
+                    table.merge(libs, options_map(as_list(lib), function(x)
+                        if not x:starts_with('-l') then
+                            x = '-l' .. x
+                        end
+                        return x
+                    end))
+                end, ...)
                 return self
             end,
 
-            define = function(self, def)
+            define = function(self, ...)
                 local defs = ensure_field(self.opts, 'defines', {})
-                table.merge(defs, options_map(as_list(def), function(x)
-                    if not x:starts_with('-D') then
-                        x = '-D' .. x
-                    end
-                    return x
-                end))
+                vargs_foreach(function(def)
+                    table.merge(defs, options_map(as_list(def), function(x)
+                        if not x:starts_with('-D') then
+                            x = '-D' .. x
+                        end
+                        return x
+                    end))
+                end, ...)
                 return self
             end,
 
-            c_flags = function(self, flags)
+            c_flags = function(self, ...)
                 local xs = ensure_field(self.opts, 'c_flags', {})
-                table.merge(xs, as_list(flags))
+                vargs_foreach(function(flags)
+                    table.merge(xs, as_list(flags))
+                end, ...)
                 return self
             end,
 
-            cx_flags = function(self, flags)
+            cx_flags = function(self, ...)
                 local xs = ensure_field(self.opts, 'cx_flags', {})
-                table.merge(xs, as_list(flags))
+                vargs_foreach(function(flags)
+                    table.merge(xs, as_list(flags))
+                end, ...)
                 return self
             end,
 
-            cxx_flags = function(self, flags)
+            cxx_flags = function(self, ...)
                 local xs = ensure_field(self.opts, 'cxx_flags', {})
-                table.merge(xs, as_list(flags))
+                vargs_foreach(function(flags)
+                    table.merge(xs, as_list(flags))
+                end, ...)
                 return self
             end,
 
-            ld_flags = function(self, flags)
+            ld_flags = function(self, ...)
                 local xs = ensure_field(self.opts, 'ld_flags', {})
-                table.merge(xs, as_list(flags))
+                vargs_foreach(function(flags)
+                    table.merge(xs, as_list(flags))
+                end, ...)
                 return self
             end,
 
-            ar_flags = function(self, flags)
+            ar_flags = function(self, ...)
                 local xs = ensure_field(self.opts, 'ar_flags', {})
-                table.merge(xs, as_list(flags))
+                vargs_foreach(function(flags)
+                    table.merge(xs, as_list(flags))
+                end, ...)
                 return self
             end,
 
@@ -371,9 +453,10 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local s; local opts = self.opts
 
                 local build_dir = path.combine(ninja.build_dir(), self.name); self.build_dir = build_dir
-                
+
                 -- local output = path.combine(build_dir, self.name .. TARGET_EXTENSION[opts.type]); self.output = output
-                local output = path.combine(ninja.build_dir(), self.name .. TARGET_EXTENSION[opts.type]); self.output = output
+                local output = path.combine(ninja.build_dir(), self.name .. TARGET_EXTENSION[opts.type]); self.output =
+                    output
 
                 local c_option_fields = { 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
 
@@ -476,7 +559,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                             local cc_rule_name = symgen(self.name .. '_cc_'); do
                                 C.ninja_rule_add(cc_rule_name, {
-                                    command = options_tostring(self.cc, options_merge({}, c_options, options_pick(opts, unpack(c_option_fields)))),
+                                    command = options_tostring(self.cc,
+                                        options_merge({}, c_options, options_pick(opts, unpack(c_option_fields)))),
                                     depfile = '$out.d',
                                     deps = dep_type,
                                     description = 'CC $out',
@@ -486,7 +570,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                             local cxx_rule_name = symgen(self.name .. '_cxx_'); do
                                 C.ninja_rule_add(cxx_rule_name, {
-                                    command = options_tostring(self.cxx, options_merge({}, cxx_options, options_pick(opts, unpack(cxx_option_fields)))),
+                                    command = options_tostring(self.cxx,
+                                        options_merge({}, cxx_options, options_pick(opts, unpack(cxx_option_fields)))),
                                     depfile = '$out.d',
                                     deps = dep_type,
                                     description = 'CXX $out',
@@ -693,7 +778,7 @@ function ninja.build(targets, opts)
     if targets == nil then
         targets = ninja.targets
     end
-    
+
     ninja.targets_foreach(targets, function(target)
         if configure then
             target:configure()
@@ -703,7 +788,7 @@ function ninja.build(targets, opts)
 end
 
 function ninja.watch(dir, targets, opts)
-    fs.watch(dir, function ()
+    fs.watch(dir, function()
         ninja.build(targets, opts)
     end)
 end
