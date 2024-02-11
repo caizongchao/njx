@@ -1,10 +1,9 @@
 #include "ljx.h"
 #include "ljxx.h"
 #include "ioxx.h"
+#include "spawn.h"
 
 #include <filesystem>
-
-extern "C" int luaopen_lfs(lua_State * L);
 
 void ninja_initialize();
 
@@ -16,11 +15,54 @@ int main(int argc, char ** argv) {
             package.def("path", "./?.lua;/zip/?.lua");
         }
 
-        auto _G = $L._G(); {
-            _G.def("__registry", $L._R());
-        }
+        auto _G = $L._G();
 
-        luaopen_lfs($L);
+        _G
+            .def("__registry", $L._R())
+            .def(
+                "exec", (lua_CFunction)[](lua_State * L)->int {
+                    int argc = lua_gettop(L); {
+                        if(argc < 1) {
+                            fatal("exec: expected at least 1 argument, got %d", argc); return 0;
+                        }
+                    }
+
+                    auto argv = (const char **)alloca((argc + 1) * sizeof(char *)); {
+                        for(int i = 0; i < argc; i++) {
+                            argv[i] = (char *)luaL_checkstring(L, i + 1);
+                        }
+
+                        argv[argc] = nullptr;
+                    }
+
+                    pid_t pid {-1};
+
+                    posix_spawn_file_actions_t actions; {
+                        ok = posix_spawn_file_actions_init(&actions);
+                        ok = posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0);
+                        ok = posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0);
+                    }
+
+                    posix_spawnattr_t attrs; {
+                        ok = posix_spawnattr_init(&attrs);
+                        ok = posix_spawnattr_setflags(&attrs, POSIX_SPAWN_SETSIGMASK);
+                        ok = posix_spawnattr_setsigmask(&attrs, nullptr);
+                    }
+
+                    int r = posix_spawnp(&pid, argv[0], &actions, &attrs, (char * const *)argv, nullptr); {
+                        if(r != 0) {
+                            fatal("failed to spawn '%s': %s", argv[0], strerror(r)); return 0;
+                        }
+                    }
+
+                    int status;
+
+                    waitpid(pid, &status, 0);
+
+                    lua_pushinteger(L, status);
+
+                    return 1;
+                });
 
         $L.load("ljx", "ninja");
 
@@ -84,6 +126,26 @@ int main(int argc, char ** argv) {
                 std::filesystem::remove_all(path, ec);
 
                 if(ec) fatal("failed to remove directory '%s': %s", path, ec.message().c_str());
+            })
+            .def("remove_all_in", [](const char * path) {
+                std::error_code ec;
+
+                std::filesystem::directory_iterator it(path, ec); {
+                    if(ec) return;
+                }
+
+                for(auto & p : it) {
+                    std::filesystem::remove_all(p, ec);
+
+                    if(ec) fatal("failed to remove '%s': %s", p.path().c_str(), ec.message().c_str());
+                }
+            })
+            .def("rm", [](const char * path) {
+                std::error_code ec;
+
+                std::filesystem::remove(path, ec);
+
+                if(ec) fatal("failed to remove file '%s': %s", path, ec.message().c_str());
             });
     }).open();
 

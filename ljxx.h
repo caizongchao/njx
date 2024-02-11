@@ -412,15 +412,15 @@ inline lua_value::lua_value(const char * s) { setstrV($L, &value, lj_str_newz($L
 
 inline lua_value::lua_value(std::string_view const & s) { setstrV($L, &value, lj_str_new($L, s.data(), s.size())); }
 
-inline lua_value::lua_value(lua_CFunction f) {
-    lua_State * L = $L; lua_pushcclosure(L, f, 0); value = *--L->top;
-}
-
 inline lua_value::lua_value(GCtab * t) { settabV($L, &value, t); }
 
 inline lua_value::lua_value(lua_table t) : lua_value(t.value) {}
 
 inline lua_value::lua_value(GCcdata * c) { setcdataV($L, &value, c); }
+
+inline lua_value::lua_value(lua_CFunction f) {
+    lua_State * L = $L; lua_pushcclosure(L, f, 0); value = *--L->top;
+}
 
 template<of_invokable F>
 lua_value::lua_value(F && f) {

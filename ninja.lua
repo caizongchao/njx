@@ -205,7 +205,7 @@ end
 
 local setupaction_map = {
     mkdir = {
-        run = function(dir)
+        build = function(dir)
             fs.mkdir(dir)
         end,
 
@@ -214,19 +214,42 @@ local setupaction_map = {
         end,
     },
 
-    copy = {
-        run = function()
+    rmdir = {
+        build = function(dir)
+            fs.rmdir(dir)
         end,
 
-        clean = function()
+        clean = function(dir)
+        end,
+    },
+
+    copy = {
+        build = function(dst, src, opts)
+            fs.copy(dst, src, opts)
+        end,
+
+        clean = function(dst)
+            fs.rm(dst)
         end,
     },
 
     touch = {
-        run = function()
+        build = function(path)
+            fs.touch(path)
         end,
 
-        clean = function()
+        clean = function(path)
+            fs.rm(path)
+        end,
+    },
+
+    exec = {
+        build = function(...)
+            _G.exec(...)
+        end,
+
+        clean = function(...)
+            _G.exec(...)
         end,
     },
 }
@@ -245,6 +268,18 @@ local function setupaction_foreach(x, fx)
             fx(x)
         end
     end
+end
+
+local function setupaction_run(x, stage)
+    setupaction_foreach(x, function(action)
+        local t = type(action); if t == 'function' then
+            action(stage); return
+        end
+
+        local a = setupaction_map[action[1]].stage; if a then
+            a(unpack(action, 2))
+        end
+    end)
 end
 
 local basic_toolchain; basic_toolchain = object({
@@ -624,9 +659,17 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 if not self.configured then
                     self:configure()
                 end
+
+                setupaction_run(self.opts.setup, 'build')
+
                 if self.output then
                     C.ninja_build(self.output)
                 end
+            end,
+
+            clean = function(self)
+                setupaction_run(self.opts.setup, 'clean')
+                fs.remove_all_in(self.build_dir)
             end,
         }
     },
@@ -784,6 +827,16 @@ function ninja.build(targets, opts)
             target:configure()
         end
         target:build()
+    end)
+end
+
+function ninja.clean(targets)
+    if targets == nil then
+        targets = ninja.targets
+    end
+
+    ninja.targets_foreach(targets, function(target)
+        target:clean()
     end)
 end
 
