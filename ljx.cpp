@@ -113,6 +113,34 @@ int main(int argc, char ** argv) {
 
                 if(ec) fatal("failed to copy '%s' to '%s': %s", src, dst, ec.message().c_str());
             })
+            .def("copy_file", [](const char * dst, const char * src) {
+                std::error_code ec;
+
+                std::filesystem::copy_file(src, dst, std::filesystem::copy_options::overwrite_existing, ec);
+
+                if(ec) fatal("failed to copy '%s' to '%s': %s", src, dst, ec.message().c_str());
+            })
+            .def("update_file", [](const char * dst, const char * src) {
+                std::error_code ec;
+
+                std::filesystem::copy_file(src, dst, std::filesystem::copy_options::update_existing, ec);
+
+                if(ec) fatal("failed to update '%s' with '%s': %s", dst, src, ec.message().c_str());
+            })
+            .def("copy_dir", [](const char * dst, const char * src) {
+                std::error_code ec;
+
+                std::filesystem::copy(src, dst, std::filesystem::copy_options::none, ec);
+
+                if(ec) fatal("failed to copy '%s' to '%s': %s", src, dst, ec.message().c_str());
+            })
+            .def("copy_dir_recursive", [](const char * dst, const char * src) {
+                std::error_code ec;
+
+                std::filesystem::copy(src, dst, std::filesystem::copy_options::recursive, ec);
+
+                if(ec) fatal("failed to copy '%s' to '%s': %s", src, dst, ec.message().c_str());
+            })
             .def("mkdir", [](const char * path) {
                 std::error_code ec;
 

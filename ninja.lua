@@ -223,13 +223,43 @@ local setupaction_map = {
         end,
     },
 
-    copy = {
-        build = function(dst, src, opts)
-            fs.copy(dst, src, opts)
+    copy_file = {
+        build = function(dst, src)
+            fs.copy_file(dst, src)
         end,
 
         clean = function(dst)
             fs.rm(dst)
+        end,
+    },
+
+    update_file = {
+        build = function(dst, src)
+            fs.update_file(dst, src)
+        end,
+
+        clean = function(dst)
+            fs.rm(dst)
+        end,
+    },
+
+    copy_dir = {
+        build = function(dst, src)
+            fs.copy_dir(dst, src)
+        end,
+
+        clean = function(dst)
+            fs.rmdir(dst)
+        end,
+    },
+
+    copy_dir_recursive = {
+        build = function(dst, src)
+            fs.copy_dir_recursive(dst, src)
+        end,
+
+        clean = function(dst)
+            fs.rmdir(dst)
         end,
     },
 
@@ -282,9 +312,20 @@ local function setupaction_run(x, stage)
     end)
 end
 
+ninja.tool = {
+}
+
 local basic_toolchain; basic_toolchain = object({
     target = {
         basic = {
+            use = function(self, tool, file_type, opts)
+                local tools = ensure_field(self.opts, 'tools', {})
+                for _, ext in ipairs(as_list(file_type)) do
+                    tools[ext] = tool
+                end
+                return self
+            end,
+
             setup = function(self, ...)
                 local actions = ensure_field(self.opts, 'setup', {})
                 vargs_foreach(function(action)
@@ -487,11 +528,25 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local s; local opts = self.opts
 
-                local build_dir = path.combine(ninja.build_dir(), self.name); self.build_dir = build_dir
+                local build_dir = path.combine(ninja.build_dir(), self.name); do
+                    self.build_dir = build_dir
+                end
 
-                -- local output = path.combine(build_dir, self.name .. TARGET_EXTENSION[opts.type]); self.output = output
-                local output = path.combine(ninja.build_dir(), self.name .. TARGET_EXTENSION[opts.type]); self.output =
-                    output
+                local output = path.combine(ninja.build_dir(), self.name .. TARGET_EXTENSION[opts.type]); do
+                    self.output = output
+                end
+
+                local rules = {}
+
+                for ext, tool in pairs(opts.tools) do
+                    local tool_rulename = symgen(self.name .. '_tool_' .. ext); do
+                        C.ninja_rule_add(tool_rulename, {
+                            command = tool,
+                            description = 'BUILD $out',
+                        })
+                    end
+                    rules[ext] = tool_rulename
+                end
 
                 local c_option_fields = { 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
 
@@ -527,8 +582,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 end
 
                 local ar_options = options_merge({}, options_pick(opts, 'ar_flags'))
-
-                local rules = {}
 
                 local rule_postfix = self.rule_postfix
                 local dep_type = self.dep_type

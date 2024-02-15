@@ -218,6 +218,16 @@ local function table_mapk(t, fx)
     return r
 end
 
+local function table_deepcopy(t)
+    local r = {}; for k, v in pairs(t) do
+        if type(v) == 'table' then
+            v = table_deepcopy(v)
+        end
+        r[k] = v
+    end
+    return r
+end
+
 setmetatable(table, {
     __index = {
         isempty = table_isempty,
@@ -227,6 +237,7 @@ setmetatable(table, {
         pop = table_pop,
         map = table_map,
         mapk = table_mapk,
+        deepcopy = table_deepcopy,
     }
 })
 
