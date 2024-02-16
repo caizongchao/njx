@@ -228,6 +228,18 @@ local function table_deepcopy(t)
     return r
 end
 
+local function table_foreach(t, fx)
+    for k, v in pairs(t) do
+        if fx(k, v) == false then break end
+    end
+end
+
+local function table_iforeach(t, fx)
+    for i, v in ipairs(t) do
+        if fx(v, i) == false then break end
+    end
+end
+
 setmetatable(table, {
     __index = {
         isempty = table_isempty,
@@ -238,6 +250,8 @@ setmetatable(table, {
         map = table_map,
         mapk = table_mapk,
         deepcopy = table_deepcopy,
+        foreach = table_foreach,
+        iforeach = table_iforeach,
     }
 })
 

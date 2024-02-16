@@ -200,7 +200,7 @@ local options = {
 }; _G.options = options
 
 local function symgen(prefix)
-    return prefix .. tostring(__counter_next())
+    return (prefix or '') .. tostring(__counter_next())
 end
 
 local setupaction_map = {
@@ -320,9 +320,21 @@ local basic_toolchain; basic_toolchain = object({
         basic = {
             use = function(self, tool, file_type, opts)
                 local tools = ensure_field(self.opts, 'tools', {})
-                for _, ext in ipairs(as_list(file_type)) do
-                    tools[ext] = tool
+
+                local name; if type(tool) == 'string' then
+                    name = tool; tool = ninja.tool[name]
                 end
+
+                local t = {
+                    fx = tool, opts = opts or {}
+                }
+
+                if name then tools[name] = t end
+
+                for _, ext in ipairs(as_list(file_type)) do
+                    tools[ext] = t
+                end
+
                 return self
             end,
 
@@ -336,6 +348,36 @@ local basic_toolchain; basic_toolchain = object({
         },
     }
 })
+
+local function file_is_typeof(files, extensions)
+    for _, file in ipairs(as_list(files)) do
+        for _, ext in ipairs(as_list(extensions)) do
+            if file:ends_with(ext) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local c_file_extensions = { '.c' }
+local cxx_file_extensions = { '.cpp', '.cxx', '.cc' }
+
+local c_option_fields = { 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
+local cxx_option_fields = { 'cxx_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
+local ld_option_fields = { 'ld_flags', 'libs', 'lib_dirs' }
+
+local function source_foreach(srcs, fx)
+    for _, x in ipairs(as_list(srcs)) do
+        if path.is_wildcard(x) then
+            fs.foreach(x, function(f)
+                fx(f)
+            end)
+        else
+            fx(x)
+        end
+    end
+end
 
 local basic_cc_toolchain; basic_cc_toolchain = object({
     target = {
@@ -541,14 +583,12 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 for ext, tool in pairs(opts.tools) do
                     local tool_rulename = symgen(self.name .. '_tool_' .. ext); do
                         C.ninja_rule_add(tool_rulename, {
-                            command = tool,
+                            command = tool.fx(tool.opts),
                             description = 'BUILD $out',
                         })
                     end
                     rules[ext] = tool_rulename
                 end
-
-                local c_option_fields = { 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
 
                 local c_options = options_merge({}, options_pick(opts, unpack(c_option_fields)))
 
@@ -559,8 +599,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     end
                 end
 
-                local cxx_option_fields = { 'cxx_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
-
                 local cxx_options = options_merge({}, options_pick(opts, unpack(cxx_option_fields)))
 
                 if opts.deps then
@@ -569,8 +607,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                         options_public_merge(cxx_options, options_pick(opts, unpack(cxx_option_fields)))
                     end
                 end
-
-                local ld_option_fields = { 'ld_flags', 'libs', 'lib_dirs' }
 
                 local ld_options = options_merge({}, options_pick(opts, unpack(ld_option_fields)))
 
@@ -594,7 +630,9 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                         description = 'CC $out',
                     })
                 end
-                rules['.c'] = cc_rule_name
+                table.foreach(c_file_extensions, function(ext)
+                    rules[ext] = cc_rule_name
+                end)
 
                 local cxx_rule_name = symgen(self.name .. '_cxx_'); do
                     C.ninja_rule_add(cxx_rule_name, {
@@ -604,9 +642,9 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                         description = 'CXX $out',
                     })
                 end
-                rules['.cpp'] = cxx_rule_name
-                rules['.cxx'] = cxx_rule_name
-                rules['.cc'] = cxx_rule_name
+                table.foreach(cxx_file_extensions, function(ext)
+                    rules[ext] = cxx_rule_name
+                end)
 
                 local ld_rule_name = symgen(self.name .. '_ld_'); do
                     C.ninja_rule_add(ld_rule_name, {
@@ -623,7 +661,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 end
 
                 local objs = {}; local srcs = as_list(opts.srcs); do
-                    local function add_src(src, rules)
+                    local function add_c_src(src, rules)
                         local obj = path.combine(build_dir, src .. '.o')
 
                         table.insert(objs, obj)
@@ -643,49 +681,71 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                 ::continue::
                             end
 
-                            local rules = {}
+                            local xrules = setmetatable({}, { __index = rules })
 
-                            local cc_rule_name = symgen(self.name .. '_cc_'); do
-                                C.ninja_rule_add(cc_rule_name, {
-                                    command = options_tostring(self.cc,
-                                        options_merge({}, c_options, options_pick(opts, unpack(c_option_fields)))),
-                                    depfile = '$out.d',
-                                    deps = dep_type,
-                                    description = 'CC $out',
-                                })
-                            end
-                            rules['.c'] = cc_rule_name
-
-                            local cxx_rule_name = symgen(self.name .. '_cxx_'); do
-                                C.ninja_rule_add(cxx_rule_name, {
-                                    command = options_tostring(self.cxx,
-                                        options_merge({}, cxx_options, options_pick(opts, unpack(cxx_option_fields)))),
-                                    depfile = '$out.d',
-                                    deps = dep_type,
-                                    description = 'CXX $out',
-                                })
-                            end
-                            rules['.cpp'] = cxx_rule_name
-                            rules['.cxx'] = cxx_rule_name
-                            rules['.cc'] = cxx_rule_name
-
-                            for _, x in ipairs(src) do
-                                if path.is_wildcard(x) then
-                                    fs.foreach(x, function(f)
-                                        add_src(f, rules)
-                                    end)
-                                else
-                                    add_src(x, rules)
+                            if opts.tool then
+                                local n, t; do
+                                    local x = type(opts.tool); if x == 'string' then
+                                        n = opts.tool; t = ninja.tool[n]
+                                    else
+                                        n = symgen(); if x == 'function' then
+                                            t = { fx = x, opts = {} }
+                                        else
+                                            t = opts.tool
+                                        end
+                                    end
                                 end
-                            end
-                        else
-                            if path.is_wildcard(src) then
-                                fs.foreach(src, function(f)
-                                    add_src(f, rules)
+
+                                local tool_rulename = symgen(self.name .. '_tool_' .. n); do
+                                    C.ninja_rule_add(tool_rulename, {
+                                        command = t.fx(t.opts),
+                                        description = 'BUILD $out',
+                                    })
+                                end
+
+                                source_foreach(src, function(f)
+                                    C.ninja_edge_add(t.fx(t.opts, f), tool_rulename, f, nil)
                                 end)
                             else
-                                add_src(src, rules)
+                                if file_is_typeof(src, c_file_extensions) then
+                                    local cc_rule_name = symgen(self.name .. '_cc_'); do
+                                        C.ninja_rule_add(cc_rule_name, {
+                                            command = options_tostring(self.cc,
+                                                options_merge({}, c_options, options_pick(opts, unpack(c_option_fields)))),
+                                            depfile = '$out.d',
+                                            deps = dep_type,
+                                            description = 'CC $out',
+                                        })
+                                    end
+                                    table.foreach(c_file_extensions, function(ext)
+                                        xrules[ext] = cc_rule_name
+                                    end)
+                                end
+
+                                if file_is_typeof(src, cxx_file_extensions) then
+                                    local cxx_rule_name = symgen(self.name .. '_cxx_'); do
+                                        C.ninja_rule_add(cxx_rule_name, {
+                                            command = options_tostring(self.cxx,
+                                                options_merge({}, cxx_options,
+                                                    options_pick(opts, unpack(cxx_option_fields)))),
+                                            depfile = '$out.d',
+                                            deps = dep_type,
+                                            description = 'CXX $out',
+                                        })
+                                    end
+                                    table.foreach(cxx_file_extensions, function(ext)
+                                        xrules[ext] = cxx_rule_name
+                                    end)
+                                end
+
+                                source_foreach(src, function(f)
+                                    add_c_src(f, xrules)
+                                end)
                             end
+                        else
+                            source_foreach(src, function(f)
+                                add_c_src(f, rules)
+                            end)
                         end
                     end
                 end; self.objs = objs
