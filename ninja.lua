@@ -203,20 +203,26 @@ local function symgen(prefix)
     return (prefix or '') .. tostring(__counter_next())
 end
 
-local setupaction_map = {
+ninja.action = {
     mkdir = {
-        build = function(dir)
-            fs.mkdir(dir)
+        build = function(...)
+            vargs_foreach(function(dir)
+                fs.mkdir(dir)
+            end, ...)
         end,
 
-        clean = function(dir)
-            fs.rmdir(dir)
+        clean = function(...)
+            vargs_foreach(function(dir)
+                fs.rmdir(dir)
+            end, ...)
         end,
     },
 
     rmdir = {
-        build = function(dir)
-            fs.rmdir(dir)
+        build = function(...)
+            vargs_foreach(function(dir)
+                fs.rmdir(dir)
+            end, ...)
         end,
 
         clean = function(dir)
@@ -264,12 +270,16 @@ local setupaction_map = {
     },
 
     touch = {
-        build = function(path)
-            fs.touch(path)
+        build = function(...)
+            vargs_foreach(function(path)
+                fs.touch(path)
+            end, ...)
         end,
 
-        clean = function(path)
-            fs.rm(path)
+        clean = function(...)
+            vargs_foreach(function(path)
+                fs.rm(path)
+            end, ...)
         end,
     },
 
@@ -284,18 +294,23 @@ local setupaction_map = {
     },
 }
 
-local function setupaction_foreach(x, fx)
-    if x == nil then return end
-
-    local t = type(x); if t == 'function' then
-        fx(x)
+local function is_action(x)
+    local t = type(x); if t == 'function' or t == 'string' then
+        return true
     elseif t == 'table' then
-        local a = x[1]; if type(a) == 'table' then
-            for _, v in pairs(x) do
-                setupaction_foreach(v, fx)
-            end
-        else
-            fx(x)
+        local a = x[1]; if a == nil or type(a) == 'string' then
+            return true
+        end
+    end
+    return false
+end
+
+local function setupaction_foreach(x, fx)
+    if is_action(x) then
+        fx(x)
+    elseif type(x) == 'table' then
+        for _, a in ipairs(x) do
+            setupaction_foreach(a, fx)
         end
     end
 end
@@ -306,8 +321,20 @@ local function setupaction_run(x, stage)
             action(stage); return
         end
 
-        local a = setupaction_map[action[1]].stage; if a then
-            a(unpack(action, 2))
+        local a; if t == 'string' then
+            a = ninja.action[action]; if a and a[stage] then
+                a[stage]()
+            end
+        elseif t == 'table' then
+            if action[1] == nil then
+                a = action; if a and a.stage then
+                    a.stage()
+                end
+            else
+                a = ninja.action[action[1]]; if a and a[stage] then
+                    a[stage](unpack(action, 2))
+                end
+            end
         end
     end)
 end
@@ -318,6 +345,18 @@ ninja.tool = {
 local basic_toolchain; basic_toolchain = object({
     target = {
         basic = {
+            new = function(self, opts)
+                local t = object()
+
+                table.iforeach(self.__mixin, function(v, i)
+                    t.__mixin[i] = v
+                end)
+
+                t.opts = opts or {}
+
+                return t
+            end,
+
             use = function(self, tool, file_type, opts)
                 local tools = ensure_field(self.opts, 'tools', {})
 
@@ -351,12 +390,15 @@ local basic_toolchain; basic_toolchain = object({
 
 local function file_is_typeof(files, extensions)
     for _, file in ipairs(as_list(files)) do
+        local x = path.extension(file)
+
         for _, ext in ipairs(as_list(extensions)) do
-            if file:ends_with(ext) then
+            if path.ifnmatch(x, ext) then
                 return true
             end
         end
     end
+
     return false
 end
 
@@ -382,10 +424,14 @@ end
 local basic_cc_toolchain; basic_cc_toolchain = object({
     target = {
         new = function(name, opts)
-            local target = extends({
+            local target = extends(object({
                 name = name, opts = table.merge({ type = 'binary' }, opts)
-            }, basic_toolchain.target.basic, basic_cc_toolchain.target.basic)
-            ninja.targets[name] = target
+            }), basic_toolchain.target.basic, basic_cc_toolchain.target.basic)
+
+            if name ~= nil then
+                ninja.targets[name] = target
+            end
+
             return target
         end,
 
@@ -416,38 +462,39 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 return self
             end,
 
-            std = function(self, x)
-                local cstd, cxxstd
+            std = function(self, ...)
+                vargs_foreach(function(x)
+                    local cstd, cxxstd
 
-                if type(x) == 'string' then
-                    if x:starts_with('c++') then
-                        cxxstd = x
+                    if type(x) == 'string' then
+                        if x:starts_with('c++') then
+                            cxxstd = x
+                        else
+                            cstd = x
+                        end
                     else
-                        cstd = x
+                        if x.c then
+                            cstd = x.c
+                        elseif x.cxx then
+                            cxxstd = x.cxx
+                        end
                     end
-                else
-                    if x.c then
-                        cstd = x.c
-                    elseif x.cxx then
-                        cxxstd = x.cxx
+
+                    if cstd then
+                        self:c_flags(self:make_flag('std', cstd))
                     end
-                end
 
-                if cstd then
-                    self:c_flags(self:make_flag('std', cstd))
-                end
-
-                if cxxstd then
-                    self:cxx_flags(self:make_flag('std', cxxstd))
-                end
-
+                    if cxxstd then
+                        self:cxx_flags(self:make_flag('std', cxxstd))
+                    end
+                end, ...)
                 return self
             end,
 
             src = function(self, ...)
                 local srcs = ensure_field(self.opts, 'srcs', {})
                 vargs_foreach(function(src)
-                    table.merge(srcs, as_list(src))
+                    table.insert(srcs, src)
                 end, ...)
                 return self
             end,
@@ -580,14 +627,16 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local rules = {}
 
-                for ext, tool in pairs(opts.tools) do
-                    local tool_rulename = symgen(self.name .. '_tool_' .. ext); do
-                        C.ninja_rule_add(tool_rulename, {
-                            command = tool.fx(tool.opts),
-                            description = 'BUILD $out',
-                        })
+                if opts.tools then
+                    for ext, tool in pairs(opts.tools) do
+                        local tool_rulename = symgen(self.name .. '_tool_' .. ext); do
+                            C.ninja_rule_add(tool_rulename, {
+                                command = tool.fx(tool.opts),
+                                description = 'BUILD $out',
+                            })
+                        end
+                        rules[ext] = tool_rulename
                     end
-                    rules[ext] = tool_rulename
                 end
 
                 local c_options = options_merge({}, options_pick(opts, unpack(c_option_fields)))
@@ -630,7 +679,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                         description = 'CC $out',
                     })
                 end
-                table.foreach(c_file_extensions, function(ext)
+                table.iforeach(c_file_extensions, function(ext)
                     rules[ext] = cc_rule_name
                 end)
 
@@ -642,7 +691,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                         description = 'CXX $out',
                     })
                 end
-                table.foreach(cxx_file_extensions, function(ext)
+                table.iforeach(cxx_file_extensions, function(ext)
                     rules[ext] = cxx_rule_name
                 end)
 
@@ -671,53 +720,63 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                     for _, src in ipairs(srcs) do
                         if type(src) == 'table' then
-                            local opts = {}
-                            for k, v in pairs(src) do
+                            local xtarget = self:new(); for k, v in pairs(src) do
                                 if type(k) == 'number' then
                                     goto continue
                                 else
-                                    opts[k] = v
+                                    local a = xtarget[k]; if a then
+                                        if type(a) == 'function' then
+                                            a(xtarget, unpack(as_list(v)))
+                                        else
+                                            xtarget[k] = v
+                                        end
+                                    else
+                                        xtarget.opts[k] = v
+                                    end
                                 end
                                 ::continue::
                             end
 
-                            local xrules = setmetatable({}, { __index = rules })
+                            local xopts = xtarget.opts
+                            local xrules = extends({}, rules)
 
-                            if opts.tool then
+                            if xopts.tool then
                                 local n, t; do
-                                    local x = type(opts.tool); if x == 'string' then
-                                        n = opts.tool; t = ninja.tool[n]
+                                    local x = type(xopts.tool); if x == 'string' then
+                                        n = xopts.tool; t = ninja.tool[n]
                                     else
                                         n = symgen(); if x == 'function' then
                                             t = { fx = x, opts = {} }
                                         else
-                                            t = opts.tool
+                                            t = xopts.tool
                                         end
                                     end
                                 end
 
+                                local topts = extends({}, xopts, t.opts)
+
                                 local tool_rulename = symgen(self.name .. '_tool_' .. n); do
                                     C.ninja_rule_add(tool_rulename, {
-                                        command = t.fx(t.opts),
+                                        command = t.fx(topts),
                                         description = 'BUILD $out',
                                     })
                                 end
 
                                 source_foreach(src, function(f)
-                                    C.ninja_edge_add(t.fx(t.opts, f), tool_rulename, f, nil)
+                                    C.ninja_edge_add(t.fx(topts, f), tool_rulename, f, nil)
                                 end)
                             else
                                 if file_is_typeof(src, c_file_extensions) then
                                     local cc_rule_name = symgen(self.name .. '_cc_'); do
                                         C.ninja_rule_add(cc_rule_name, {
                                             command = options_tostring(self.cc,
-                                                options_merge({}, c_options, options_pick(opts, unpack(c_option_fields)))),
+                                                options_merge({}, c_options, options_pick(xopts, unpack(c_option_fields)))),
                                             depfile = '$out.d',
                                             deps = dep_type,
                                             description = 'CC $out',
                                         })
                                     end
-                                    table.foreach(c_file_extensions, function(ext)
+                                    table.iforeach(c_file_extensions, function(ext)
                                         xrules[ext] = cc_rule_name
                                     end)
                                 end
@@ -727,13 +786,13 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                         C.ninja_rule_add(cxx_rule_name, {
                                             command = options_tostring(self.cxx,
                                                 options_merge({}, cxx_options,
-                                                    options_pick(opts, unpack(cxx_option_fields)))),
+                                                    options_pick(xopts, unpack(cxx_option_fields)))),
                                             depfile = '$out.d',
                                             deps = dep_type,
                                             description = 'CXX $out',
                                         })
                                     end
-                                    table.foreach(cxx_file_extensions, function(ext)
+                                    table.iforeach(cxx_file_extensions, function(ext)
                                         xrules[ext] = cxx_rule_name
                                     end)
                                 end
@@ -750,19 +809,23 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     end
                 end; self.objs = objs
 
-                local deplibs = {}; options_foreach(opts.deps, function(dep)
-                    local tdep = ninja.targets[dep]
+                if not table.isempty(objs) then
+                    local deplibs = {}; options_foreach(opts.deps, function(dep)
+                        local tdep = ninja.targets[dep]
 
-                    if (tdep.type == 'shared') or (tdep.type == 'static') then
-                        table.insert(deplibs, tdep.output)
+                        if (tdep.type == 'shared') or (tdep.type == 'static') then
+                            table.insert(deplibs, tdep.output)
+                        end
+                    end)
+
+                    C.ninja_edge_add(output, pick(opts.type == 'static', ar_rule_name, ld_rule_name),
+                        options_merge({}, objs, deplibs), nil)
+
+                    if opts.default ~= false then
+                        C.ninja_default_add(output)
                     end
-                end)
-
-                C.ninja_edge_add(output, pick(opts.type == 'static', ar_rule_name, ld_rule_name),
-                    options_merge({}, objs, deplibs), nil)
-
-                if opts.default ~= false then
-                    C.ninja_default_add(output)
+                else
+                    self.output = nil
                 end
 
                 self.configured = true
@@ -781,8 +844,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
             end,
 
             clean = function(self)
-                setupaction_run(self.opts.setup, 'clean')
                 fs.remove_all_in(self.build_dir)
+                setupaction_run(self.opts.setup, 'clean')
             end,
         }
     },

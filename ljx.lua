@@ -103,33 +103,33 @@ ffi.cdef [[
 local __mixin = '__mixin'
 
 local function object(x)
-    x = x or {}; x.__index = function(self, key)
-        local mx = rawget(self, __mixin); if mx then
-            for _, m in ipairs(mx) do
-                local v = m[key]; if v then
-                    self[key] = v; return v
-                end
+    local mx; if x == nil then
+        mx = {}; x = { __mixin = mx }
+    else
+        mx = rawget(x, __mixin); if mx == nil then
+            mx = {}; rawset(x, __mixin, mx)
+        else
+            return x, mx
+        end
+    end
+
+    x.__index = function(self, key)
+        for _, m in ipairs(mx) do
+            local v = m[key]; if v then
+                self[key] = v; return v
             end
         end
         return nil
     end;
-    setmetatable(x, x); return x
+
+    return setmetatable(x, x), mx
 end; _G.object = object
 
-local function inherits(base, x)
-    x = (x and x.__index) and x or object(x)
-    local m = rawget(x, __mixin); if not m then
-        m = {}; rawset(x, __mixin, m)
-    end
-    table.insert(m, 1, base)
-    return x
-end; _G.inherits = inherits
-
 local function extends(x, ...)
-    vargs_foreach(function(base)
-        inherits(base, x)
+    local xx, mx = object(x); vargs_foreach(function(base)
+        table.insert(mx, 1, base)
     end, ...)
-    return x
+    return xx
 end; _G.extends = extends
 
 local function stacktrace(...)
@@ -695,12 +695,23 @@ local function files_foreach(path, fx)
     return directory_walk(path, opts)
 end
 
+local function file_generate(dst, src, fx)
+    if fs.is_uptodate(dst, src) then
+        return
+    end
+
+    fx(dst, src)
+
+    fs.update_mtime(dst, src)
+end
+
 do
     local fs = {}; do
         fs.walk = directory_walk
         fs.file_exists = file_exists
         fs.directory_exists = directory_exists
         fs.foreach = files_foreach
+        fs.generate = file_generate
     end
     _G.fs = fs
 end

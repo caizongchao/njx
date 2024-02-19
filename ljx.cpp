@@ -2,6 +2,7 @@
 #include "ljxx.h"
 #include "ioxx.h"
 #include "spawn.h"
+#include "fnmatch.h"
 
 #include <filesystem>
 
@@ -45,8 +46,8 @@ int main(int argc, char ** argv) {
 
                     posix_spawnattr_t attrs; {
                         ok = posix_spawnattr_init(&attrs);
-                        ok = posix_spawnattr_setflags(&attrs, POSIX_SPAWN_SETSIGMASK);
-                        ok = posix_spawnattr_setsigmask(&attrs, nullptr);
+                        // ok = posix_spawnattr_setflags(&attrs, POSIX_SPAWN_SETSIGMASK);
+                        // ok = posix_spawnattr_setsigmask(&attrs, nullptr);
                     }
 
                     int r = posix_spawnp(&pid, argv[0], &actions, &attrs, (char * const *)argv, nullptr); {
@@ -66,7 +67,30 @@ int main(int argc, char ** argv) {
 
         $L.load("ljx", "ninja");
 
+        lua_table($L["path"])
+            .def("fnmatch", [](const char * pattern, const char * path) {
+                return fnmatch(pattern, path, 0) == 0;
+            })
+            .def("ifnmatch", [](const char * pattern, const char * path) {
+                return fnmatch(pattern, path, FNM_CASEFOLD) == 0;
+            });
+
         lua_table($L["fs"])
+            .def("is_uptodate", [](const char * dst, const char * src) {
+                std::error_code ec;
+
+                if(!file_exists(dst)) return false;
+
+                auto dst_time = std::filesystem::last_write_time(dst, ec);
+
+                if(ec) fatal("failed to get last write time of '%s': %s", dst, ec.message().c_str());
+
+                auto src_time = std::filesystem::last_write_time(src, ec);
+
+                if(ec) fatal("failed to get last write time of '%s': %s", src, ec.message().c_str());
+
+                return src_time == dst_time;
+            })
             .def("touch", [](const char * path) {
                 std::error_code ec;
 
@@ -126,6 +150,17 @@ int main(int argc, char ** argv) {
                 std::filesystem::copy_file(src, dst, std::filesystem::copy_options::update_existing, ec);
 
                 if(ec) fatal("failed to update '%s' with '%s': %s", dst, src, ec.message().c_str());
+            })
+            .def("update_mtime", [](const char * dst, const char * src) {
+                std::error_code ec;
+
+                auto src_time = std::filesystem::last_write_time(src, ec);
+
+                if(ec) fatal("failed to get last write time of '%s': %s", src, ec.message().c_str());
+
+                std::filesystem::last_write_time(dst, src_time, ec);
+
+                if(ec) fatal("failed to update last write time of '%s': %s", dst, ec.message().c_str());
             })
             .def("copy_dir", [](const char * dst, const char * src) {
                 std::error_code ec;

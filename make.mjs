@@ -268,6 +268,11 @@ var ljx_build_dir = 'bin/'; {
     if (!fs.existsSync(ljx_build_dir)) fs.mkdirSync(ljx_build_dir);
 }
 
+async function deploy() {
+    await run('zip -r bin/ljx.exe ljx.lua ninja.lua jit')
+    await run('copy /Y bin\\ljx.exe c:\\apps\\tools\\njx.exe')
+}
+
 async function make_ljx() {
     var b1 = await make_libninja();
     var b2 = await make_libluajit();
@@ -279,8 +284,7 @@ async function make_ljx() {
         let r = await run('cosmoc++ -Wl,--start-group -u ninja_initialize -L build lj_vm.o -lluajit -lljx -lninja -Wl,--end-group -o ' + ljx_build_dir + 'ljx.exe');
 
         if(r) {
-            await run('zip -r bin/ljx.exe ljx.lua ninja.lua jit')
-            await run('copy /Y bin\\ljx.exe c:\\apps\\tools\\njx.exe')
+            deploy();
         }
     }
 }
@@ -292,15 +296,16 @@ var compiling = false;
 watcher.on('change', async (fpath) => {
     if (compiling) return;
 
+    compiling = true;
+
     if (fpath.endsWith('.c') || fpath.endsWith('.cpp') || fpath.endsWith('.cc') || fpath.endsWith('.h')) {
-        compiling = true;
-
-        await make_ljx();
-
-        console.log('done');
-
-        compiling = false;
+        await make_ljx(); console.log('Watching...');
     }
+    else if (fpath.endsWith('.lua')) {
+        await deploy(); console.log('Watching...');
+    }
+
+    compiling = false;
 });
 
 async function main() {
