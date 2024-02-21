@@ -255,7 +255,7 @@ end
 
 local function table_iforeach(t, fx)
     if t == nil then return end
-    
+
     for i, v in ipairs(t) do
         if fx(v, i) == false then break end
     end
@@ -630,6 +630,18 @@ do
     _G.path = path
 end
 
+local function xmatch(s, pattern)
+    if string_starts_with(pattern, '>') then
+        pattern = pattern:sub(2); if s:match(pattern) then
+            return true
+        else
+            return false
+        end
+    else
+        return s:match(pattern)
+    end
+end; _G.xmatch = xmatch
+
 local function directory_walk(path, opts)
     local fx, recursive, wildcard, exclusions
 
@@ -640,7 +652,11 @@ local function directory_walk(path, opts)
 
         if opts.exclusions then
             exclusions = table_map(opts.exclusions, function(exclusion)
-                return path_wildcard_to_pattern(exclusion)
+                local pattern; if string_starts_with(exclusion, '>') then
+                    return '>' .. path_wildcard_to_pattern(exclusion:sub(2))
+                else
+                    return path_wildcard_to_pattern(exclusion)
+                end
             end)
         end
     else
@@ -658,12 +674,17 @@ local function directory_walk(path, opts)
                 if filename ~= '.' and filename ~= '..' then
                     if exclusions then
                         for _, exclusion in ipairs(exclusions) do
-                            if filename:match(exclusion) then
-                                goto next
+                            local x = xmatch(filename, exclusion)
+
+                            if x == filename then
+                                goto skip
+                            elseif x == true then
+                                goto continue
                             end
                         end
                     end
 
+                    ::continue::
                     local full_path = dir .. '/' .. filename
                     if bit.band(find_dataw[0].dwFileAttributes, 0x10) ~= 0 then
                         -- directory
@@ -679,7 +700,7 @@ local function directory_walk(path, opts)
                         end
                     end
 
-                    ::next::
+                    ::skip::
                 end
             until FindNextFileW(handle, find_dataw) == 0
             FindClose(handle)

@@ -367,6 +367,25 @@ void ninja_default_add(lua_gcptr defaults) {
     }
 }
 
+static bool ninja_buildlog_opened = false;
+
+void ninja_buildlog_open() {
+    if(!ninja_buildlog_opened) {
+        $ninja.OpenBuildLog() || halt();
+        $ninja.OpenDepsLog() || halt();
+
+        ninja_buildlog_opened = true;
+    }
+}
+
+void ninja_buildlog_close() {
+    if(ninja_buildlog_opened) {
+        $ninja.build_log_.Close(); $ninja.deps_log_.Close();
+
+        ninja_buildlog_opened = false;
+    }
+}
+
 void ninja_build(lua_gcptr targets) {
     StatusPrinter status($config); std::vector<const char *> paths;
 
@@ -386,13 +405,14 @@ void ninja_build(lua_gcptr targets) {
     $ninja.start_time_millis_ = GetTimeMillis();
 
     $ninja.EnsureBuildDirExists() || halt();
-    // $ninja.OpenBuildLog() || halt();
-    // $ninja.OpenDepsLog() || halt();
 
-    if($ninja.RunBuild(paths.size(), (char **)paths.data(), &status) == 0) {
-        $ninja.DumpMetrics();
+    ninja_buildlog_open();
+
+    if(int rc = $ninja.RunBuild(paths.size(), (char **)paths.data(), &status); rc != 0) {
+        exit(rc);
     }
 
+    // $ninja.DumpMetrics();
     // $ninja.build_log_.Close(); $ninja.deps_log_.Close();
 }
 
@@ -667,11 +687,8 @@ void ninja_initialize() {
 
     $config.parallelism = GetProcessorCount();
     ninja_var_set("builddir", DEFAULT_BUILD_DIR);
-
-    $ninja.OpenBuildLog() || halt();
-    $ninja.OpenDepsLog() || halt();
 }
 
 void ninja_finalize() {
-    delete g_metrics; $ninja.build_log_.Close(); $ninja.deps_log_.Close();
+    delete g_metrics; ninja_buildlog_close();
 }

@@ -717,12 +717,16 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 end
 
                 local objs = {}; local srcs = as_list(opts.srcs); do
-                    local function add_c_src(src, rules)
-                        local obj = path.combine(build_dir, src .. '.o')
+                    local function add_src(src, xrules)
+                        local rule = xrules[path.extension(src)]; if rule == nil then
+                            fatal('no rule for file: %s', src)
+                        end
 
-                        table.insert(objs, obj)
+                        local obj = path.combine(build_dir, src .. '.o'); do
+                            table.insert(objs, obj)
+                        end
 
-                        C.ninja_edge_add(obj, rules[path.extension(src)], src, nil)
+                        C.ninja_edge_add(obj, rule, src, nil)
                     end
 
                     for _, src in ipairs(srcs) do
@@ -805,12 +809,12 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                 end
 
                                 source_foreach(src, function(f)
-                                    add_c_src(f, xrules)
+                                    add_src(f, xrules)
                                 end)
                             end
                         else
                             source_foreach(src, function(f)
-                                add_c_src(f, rules)
+                                add_src(f, rules)
                             end)
                         end
                     end
