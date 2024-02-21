@@ -17,6 +17,7 @@ ffi.cdef [[
     } ninja_config_t;
 
     const char * host_os();
+
     ninja_config_t * ninja_config_get();
     void ninja_config_apply();
     void ninja_reset();
@@ -50,7 +51,8 @@ end
 
 local ninja = {}; _G.ninja = ninja
 
-ninja.targets = {}; ninja.toolchains = {}
+ninja.targets = {}
+ninja.toolchains = {}
 
 function ninja.config(fx)
     if fx(C.ninja_config_get()) ~= false then C.ninja_config_apply() end
@@ -424,9 +426,9 @@ end
 local basic_cc_toolchain; basic_cc_toolchain = object({
     target = {
         new = function(name, opts)
-            local target = extends(object({
+            local target = extends(object(xtype({
                 name = name, opts = table.merge({ type = 'binary' }, opts)
-            }), basic_toolchain.target.basic, basic_cc_toolchain.target.basic)
+            }, 'target')), basic_toolchain.target.basic, basic_cc_toolchain.target.basic)
 
             if name ~= nil then
                 ninja.targets[name] = target
@@ -449,8 +451,13 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
             deps = function(self, ...)
                 local deps = ensure_field(self.opts, 'deps', {})
-                vargs_foreach(function(xs)
-                    table.merge(deps, as_list(xs))
+                vargs_foreach(function(x)
+                    if type(x) == 'string' then
+                        x = ninja.targets[x]; if x == nil then
+                            fatal('target not found: %s', x)
+                        end
+                    end
+                    table.insert(deps, x)
                 end, ...)
                 return self
             end,
@@ -643,8 +650,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 if opts.deps then
                     for _, dep in ipairs(opts.deps) do
-                        local opts = dep.opts
-                        options_public_merge(c_options, options_pick(opts, unpack(c_option_fields)))
+                        local dopts = dep.opts
+                        options_public_merge(c_options, options_pick(dopts, unpack(c_option_fields)))
                     end
                 end
 
@@ -652,8 +659,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 if opts.deps then
                     for _, dep in ipairs(opts.deps) do
-                        local opts = dep.opts
-                        options_public_merge(cxx_options, options_pick(opts, unpack(cxx_option_fields)))
+                        local dopts = dep.opts
+                        options_public_merge(cxx_options, options_pick(dopts, unpack(cxx_option_fields)))
                     end
                 end
 
@@ -661,8 +668,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 if opts.deps then
                     for _, dep in ipairs(opts.deps) do
-                        local opts = dep.opts
-                        options_public_merge(ld_options, options_pick(opts, unpack(ld_option_fields)))
+                        local dopts = dep.opts
+                        options_public_merge(ld_options, options_pick(dopts, unpack(ld_option_fields)))
                     end
                 end
 
@@ -810,10 +817,9 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 end; self.objs = objs
 
                 if not table.isempty(objs) then
-                    local deplibs = {}; options_foreach(opts.deps, function(dep)
-                        local tdep = ninja.targets[dep]
-
-                        if (tdep.type == 'shared') or (tdep.type == 'static') then
+                    local deplibs = {}; table.iforeach(opts.deps, function(tdep)
+                        local topts = tdep.opts
+                        if (topts.type == 'shared') or (topts.type == 'static') then
                             table.insert(deplibs, tdep.output)
                         end
                     end)
@@ -955,7 +961,7 @@ else
     ninja.toolchain = 'gcc'
 end
 
-local function toolchain_of(x)
+function ninja.toolchain_of(x)
     if type(x) == 'string' then
         return ninja.toolchains[x]
     elseif x == nil then
@@ -963,7 +969,25 @@ local function toolchain_of(x)
     else
         return x
     end
-end; ninja.toolchain_of = toolchain_of
+end
+
+function ninja.target_of(x)
+    local t = xtype(x); if t == 'string' then
+        local a = ninja.targets[x]; if a == nil then
+            fatal('target not found: %s', x)
+        end
+        return a
+    elseif t == 'target' then
+        return x
+    elseif t == 'table' then
+        local a = {}; table.iforeach(x, function(v)
+            table.insert(a, ninja.target_of(v))
+        end)
+        return unpack(a)
+    else
+        fatal('invalid target: %s', x)
+    end
+end
 
 function ninja.target(name, opts)
     opts = opts or {}; if not opts.toolchain then
@@ -975,50 +999,61 @@ end
 local function target_walk(target, fx, ctx)
     if ctx[target] then return end
     if target.opts.deps then
-        options_foreach(target.opts.deps, function(dep)
+        table.iforeach(target.opts.deps, function(dep)
             target_walk(dep, fx, ctx)
         end)
     end
-    ctx[target] = true; fx(target)
+    fx(target); ctx[target] = true
 end
 
 function ninja.targets_foreach(targets, fx)
-    if type(targets) == 'function' then
-        fx = targets; targets = ninja.targets
+    local t = xtype(targets); if t == 'function' then
+        fx = targets; targets = ninja.targets;
+    elseif t == 'string' then
+        local a = ninja.targets[targets]; if a == nil then
+            fatal('target not found: %s', targets)
+        end
+        targets = { a }
+    elseif t == 'target' then
+        targets = { targets }
+    else
+        fatal('invalid targets: %s', targets)
     end
-    options_foreach(targets, function(target)
+
+    table.iforeach(targets, function(target)
         target_walk(target, fx, {})
     end)
 end
 
-function ninja.build(targets, opts)
-    local configure = opts and opts.configure
-
-    if targets == nil then
-        targets = ninja.targets
-    end
-
-    ninja.targets_foreach(targets, function(target)
-        if configure then
-            target:configure()
-        end
-        target:build()
-    end)
+function ninja.build(...)
+    vargs_foreach(function(target)
+        vargs_foreach(function(t)
+            ninja.targets_foreach(t, function(x)
+                x:build()
+            end)
+        end, ninja.target_of(target))
+    end, ...)
 end
 
-function ninja.clean(targets)
-    if targets == nil then
-        targets = ninja.targets
-    end
-
-    ninja.targets_foreach(targets, function(target)
-        target:clean()
-    end)
+function ninja.clean(...)
+    vargs_foreach(function(target)
+        vargs_foreach(function(t)
+            ninja.targets_foreach(t, function(x)
+                x:clean()
+            end)
+        end, ninja.target_of(target))
+    end, ...)
 end
 
-function ninja.watch(dir, targets, opts)
+function ninja.watch(dir, ...)
+    local targets = {}; vargs_foreach(function(target)
+        vargs_foreach(function(t)
+            table.insert(targets, t)
+        end, ninja.target_of(target))
+    end, ...)
+
     fs.watch(dir, function()
-        ninja.build(targets, opts)
+        ninja.build(unpack(targets))
     end)
 end
 

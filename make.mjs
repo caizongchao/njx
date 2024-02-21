@@ -281,7 +281,8 @@ async function make_ljx() {
     if (b1 || b2 || b3) {
         console.log('linking ljx.exe');
         
-        let r = await run('cosmoc++ -Wl,--start-group -u ninja_initialize -L build lj_vm.o -lluajit -lljx -lninja -Wl,--end-group -o ' + ljx_build_dir + 'ljx.exe');
+        // let r = await run('cosmoc++ -Wl,--start-group -u ninja_initialize -L build lj_vm.o -lluajit -lljx -lninja -Wl,--end-group -o ' + ljx_build_dir + 'ljx.exe');
+        let r = await run('cosmoc++ -Wl,--start-group -L build lj_vm.o -lluajit -lljx -lninja -Wl,--end-group -o ' + ljx_build_dir + 'ljx.exe');
 
         if(r) {
             deploy();

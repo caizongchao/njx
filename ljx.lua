@@ -30,6 +30,21 @@ local YES, NO = true, false; _G.YES = YES; _G.NO = NO
 
 local ok, yes = assert, assert; _G.ok = ok; _G.yes = yes
 
+local function xtype(a, x)
+    if x == nil then
+        local t = type(a); if t == 'table' then
+            local tt = a[0]; if tt ~= nil then
+                t = tt
+            end
+        end
+        return t
+    else
+        assert(type(a) == 'table', 'xtype target must be a table')
+
+        a[0] = x; return a
+    end
+end; _G.xtype = xtype
+
 local function vargs_foreach(fx, ...)
     local c = select('#', ...); if c == 0 then
         return
@@ -135,9 +150,11 @@ end; _G.extends = extends
 local function stacktrace(...)
     local msg; if select('#', ...) > 0 then
         msg = string.format(...)
+    else
+        msg = ''
     end
     print(debug.traceback(msg, 2))
-end
+end; _G.stacktrace = stacktrace
 
 local function fatal(code, ...)
     if type(code) == 'string' then
@@ -229,12 +246,16 @@ local function table_deepcopy(t)
 end
 
 local function table_foreach(t, fx)
+    if t == nil then return end
+
     for k, v in pairs(t) do
         if fx(k, v) == false then break end
     end
 end
 
 local function table_iforeach(t, fx)
+    if t == nil then return end
+    
     for i, v in ipairs(t) do
         if fx(v, i) == false then break end
     end

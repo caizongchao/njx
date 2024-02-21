@@ -7,10 +7,19 @@
 #include <filesystem>
 
 void ninja_initialize();
+void ninja_finalize();
+
+static struct ninja_initializer {
+    ninja_initializer() {
+        ninja_initialize();
+    }
+
+    ~ninja_initializer() {
+        ninja_finalize();
+    }
+} __ninja_initializer;
 
 int main(int argc, char ** argv) {
-    ninja_initialize();
-
     $L([&]() {
         lua_table package = $L["package"]; {
             package.def("path", "./?.lua;/zip/?.lua");

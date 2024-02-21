@@ -145,6 +145,8 @@ static BuildConfig $config;
 
 static NinjaMain $ninja(nullptr, $config);
 
+extern Metrics * g_metrics;
+
 static State & $state = $ninja.state_;
 static BindingEnv * $env = &$state.bindings_;
 
@@ -384,14 +386,14 @@ void ninja_build(lua_gcptr targets) {
     $ninja.start_time_millis_ = GetTimeMillis();
 
     $ninja.EnsureBuildDirExists() || halt();
-    $ninja.OpenBuildLog() || halt();
-    $ninja.OpenDepsLog() || halt();
+    // $ninja.OpenBuildLog() || halt();
+    // $ninja.OpenDepsLog() || halt();
 
     if($ninja.RunBuild(paths.size(), (char **)paths.data(), &status) == 0) {
         $ninja.DumpMetrics();
     }
 
-    $ninja.build_log_.Close(); $ninja.deps_log_.Close();
+    // $ninja.build_log_.Close(); $ninja.deps_log_.Close();
 }
 
 void ninja_clean() {
@@ -661,6 +663,15 @@ static void clib_init() {
 void ninja_initialize() {
     clib_init();
 
+    g_metrics = new Metrics();
+
     $config.parallelism = GetProcessorCount();
     ninja_var_set("builddir", DEFAULT_BUILD_DIR);
+
+    $ninja.OpenBuildLog() || halt();
+    $ninja.OpenDepsLog() || halt();
+}
+
+void ninja_finalize() {
+    delete g_metrics; $ninja.build_log_.Close(); $ninja.deps_log_.Close();
 }
