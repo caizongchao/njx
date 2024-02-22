@@ -270,7 +270,7 @@ var ljx_build_dir = 'bin/'; {
 
 async function deploy() {
     await run('zip -r bin/ljx.exe ljx.lua ninja.lua jit')
-    await run('copy /Y bin\\ljx.exe c:\\apps\\tools\\njx.exe')
+    // await run('copy /Y bin\\ljx.exe c:\\apps\\tools\\njx.exe')
 }
 
 async function make_ljx() {

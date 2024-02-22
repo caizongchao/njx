@@ -459,7 +459,7 @@ local CloseHandle = kernel32.CloseHandle
 local GetFileAttributesA = kernel32.GetFileAttributesA
 local GetFileAttributesW = kernel32.GetFileAttributesW
 
-local find_dataw = ffi.new('WIN32_FIND_DATAW[1]')
+local __find_dataw = ffi.new('WIN32_FIND_DATAW[1]')
 
 local FindFirstFileW = kernel32.FindFirstFileW
 local FindNextFileW = kernel32.FindNextFileW
@@ -630,6 +630,8 @@ do
     _G.path = path
 end
 
+-- :src(PYSRC_DIR .. 'Modules/_decimal/libmpdec/*.c|bench.c')
+-- :src(PYSRC_DIR .. 'PC/*.c|>invalid_parameter_handler.c|>config.c|*')
 local function xmatch(s, pattern)
     if string_starts_with(pattern, '>') then
         pattern = pattern:sub(2); if s:match(pattern) then
@@ -667,10 +669,10 @@ local function directory_walk(path, opts)
 
     local stack = { path }; while #stack > 0 do
         local dir = stack[#stack]; stack[#stack] = nil
-        local handle = FindFirstFileW(u82w(path_combine(dir, wildcard)), find_dataw)
+        local handle = FindFirstFileW(u82w(path_combine(dir, wildcard)), __find_dataw)
         if handle ~= INVALID_HANDLE_VALUE then
             repeat
-                local filename = w2u8(find_dataw[0].cFileName)
+                local filename = w2u8(__find_dataw[0].cFileName)
                 if filename ~= '.' and filename ~= '..' then
                     if exclusions then
                         for _, exclusion in ipairs(exclusions) do
@@ -686,7 +688,7 @@ local function directory_walk(path, opts)
 
                     ::continue::
                     local full_path = dir .. '/' .. filename
-                    if bit.band(find_dataw[0].dwFileAttributes, 0x10) ~= 0 then
+                    if bit.band(__find_dataw[0].dwFileAttributes, 0x10) ~= 0 then
                         -- directory
                         if recursive then
                             stack[#stack + 1] = full_path
@@ -702,7 +704,7 @@ local function directory_walk(path, opts)
 
                     ::skip::
                 end
-            until FindNextFileW(handle, find_dataw) == 0
+            until FindNextFileW(handle, __find_dataw) == 0
             FindClose(handle)
         end
     end
