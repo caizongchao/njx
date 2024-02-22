@@ -140,23 +140,23 @@ struct NinjaMain : public BuildLogUser {
     virtual bool IsPathDead(StringPiece s) const;
 };
 
+extern Metrics * g_metrics;
+
 static std::string $buf;
 static BuildConfig $config;
 
-static NinjaMain $ninja(nullptr, $config);
+static dtag<NinjaMain> tninja;
+static dtag<State *> tstate;
+static dtag<BindingEnv *> tenv;
 
-extern Metrics * g_metrics;
+static auto $ninja = defer_ptr(tninja, nullptr, $config);
 
-static State & $state = $ninja.state_;
-static BindingEnv * $env = &$state.bindings_;
+static auto $state = dget(tstate, []() { return &($ninja->state_); });
+static auto $env = dget(tenv, []() { return &($state->bindings_); });
 
 static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path);
 
 extern int GuessParallelism();
-
-void ninja_test(const char * msg) {
-    printf("test done\n");
-}
 
 void * ninja_config_get() { return (void *)&$config; }
 
@@ -164,21 +164,21 @@ void ninja_config_apply() {
     if($config.parallelism == 0) $config.parallelism = GuessParallelism();
 }
 
-void ninja_reset() { $state.Reset(); }
+void ninja_reset() { $state->Reset(); }
 
-void ninja_clear() { $state.paths_.clear(); $state.edges_.clear(); }
+void ninja_clear() { $state->paths_.clear(); $state->edges_.clear(); }
 
-void ninja_dump() { $state.Dump(); }
+void ninja_dump() { $state->Dump(); }
 
-const char * ninja_var_get(const char * key) { $buf = $state.bindings_.LookupVariable(key); return $buf.c_str(); }
+const char * ninja_var_get(const char * key) { $buf = $state->bindings_.LookupVariable(key); return $buf.c_str(); }
 
-void ninja_var_set(const char * key, const char * value) { $state.bindings_.AddBinding(key, value); }
+void ninja_var_set(const char * key, const char * value) { $state->bindings_.AddBinding(key, value); }
 
 void ninja_pool_add(const char * name, int depth) {
-    ($state.LookupPool(name) != nullptr) || fatal("duplicate pool '%s'", name);
+    ($state->LookupPool(name) != nullptr) || fatal("duplicate pool '%s'", name);
     (depth >= 0) || fatal("invalid pool depth %d", depth);
 
-    $state.AddPool(new Pool(name, depth));
+    $state->AddPool(new Pool(name, depth));
 }
 
 void ninja_rule_add(const char * name, lua_table vars) {
@@ -198,7 +198,7 @@ void ninja_rule_add(const char * name, lua_table vars) {
         }
     });
 
-    $state.bindings_.AddRule(r);
+    $state->bindings_.AddRule(r);
 }
 
 std::string ninja_path_read(BindingEnv * env, const char * s, uint64_t * slash_bits = 0) {
@@ -230,10 +230,10 @@ void ninja_edge_add(lua_gcptr outputs, const char * rule_name, lua_gcptr inputs,
         });
     }
 
-    Edge * edge = $state.AddEdge(rule); edge->env_ = env;
+    Edge * edge = $state->AddEdge(rule); edge->env_ = env;
 
     std::string pool_name = edge->GetBinding("pool"); if(!pool_name.empty()) {
-        Pool * pool = $state.LookupPool(pool_name); {
+        Pool * pool = $state->LookupPool(pool_name); {
             (pool != nullptr) || fatal("unknown pool name '%s'", pool_name.c_str());
         }
 
@@ -247,7 +247,7 @@ void ninja_edge_add(lua_gcptr outputs, const char * rule_name, lua_gcptr inputs,
         if(v.is_string()) {
             uint64_t slash_bits;
             std::string path = ninja_path_read(edge->env_, v.c_str(), &slash_bits);
-            $state.AddOut(edge, path, slash_bits, &err) || fatal("%s", err.c_str());
+            $state->AddOut(edge, path, slash_bits, &err) || fatal("%s", err.c_str());
         }
     });
 
@@ -260,7 +260,7 @@ void ninja_edge_add(lua_gcptr outputs, const char * rule_name, lua_gcptr inputs,
             if(v.is_string()) {
                 uint64_t slash_bits;
                 std::string path = ninja_path_read(edge->env_, v.c_str(), &slash_bits);
-                $state.AddOut(edge, path, slash_bits, &err) || fatal("%s", err.c_str());
+                $state->AddOut(edge, path, slash_bits, &err) || fatal("%s", err.c_str());
                 ++c;
             }
         });
@@ -275,7 +275,7 @@ void ninja_edge_add(lua_gcptr outputs, const char * rule_name, lua_gcptr inputs,
         if(v.is_string()) {
             uint64_t slash_bits;
             std::string path = ninja_path_read(edge->env_, v.c_str(), &slash_bits);
-            $state.AddIn(edge, path, slash_bits);
+            $state->AddIn(edge, path, slash_bits);
         }
     });
 
@@ -290,7 +290,7 @@ void ninja_edge_add(lua_gcptr outputs, const char * rule_name, lua_gcptr inputs,
             if(v.is_string()) {
                 uint64_t slash_bits;
                 std::string path = ninja_path_read(edge->env_, v.c_str(), &slash_bits);
-                $state.AddIn(edge, path, slash_bits);
+                $state->AddIn(edge, path, slash_bits);
                 ++c;
             }
         });
@@ -307,7 +307,7 @@ void ninja_edge_add(lua_gcptr outputs, const char * rule_name, lua_gcptr inputs,
             if(v.is_string()) {
                 uint64_t slash_bits;
                 std::string path = ninja_path_read(edge->env_, v.c_str(), &slash_bits);
-                $state.AddIn(edge, path, slash_bits);
+                $state->AddIn(edge, path, slash_bits);
                 ++c;
             }
         });
@@ -324,7 +324,7 @@ void ninja_edge_add(lua_gcptr outputs, const char * rule_name, lua_gcptr inputs,
             if(v.is_string()) {
                 uint64_t slash_bits;
                 std::string path = ninja_path_read(edge->env_, v.c_str(), &slash_bits);
-                $state.AddValidation(edge, path, slash_bits);
+                $state->AddValidation(edge, path, slash_bits);
                 ++c;
             }
         });
@@ -341,7 +341,7 @@ void ninja_edge_add(lua_gcptr outputs, const char * rule_name, lua_gcptr inputs,
         std::string dyndep = edge->GetUnescapedDyndep(); if(!dyndep.empty()) {
             uint64_t slash_bits;
             CanonicalizePath(&dyndep, &slash_bits);
-            edge->dyndep_ = $state.GetNode(dyndep, slash_bits);
+            edge->dyndep_ = $state->GetNode(dyndep, slash_bits);
             edge->dyndep_->set_dyndep_pending(true);
 
             (std::find(edge->inputs_.begin(), edge->inputs_.end(), edge->dyndep_) != edge->inputs_.end()) || fatal("dyndep '%s' is not an input", dyndep.c_str());
@@ -354,14 +354,14 @@ void ninja_default_add(lua_gcptr defaults) {
     std::string e;
 
     if(defaults.is_string()) {
-        ok == $state.AddDefault(ninja_path_read($env, defaults.as_string().c_str()), &e) || fatal("%s", e.c_str());
+        ok == $state->AddDefault(ninja_path_read($env, defaults.as_string().c_str()), &e) || fatal("%s", e.c_str());
     }
     else if(defaults.is_table()) {
         lua_table const & t = defaults.as_table();
 
         t.for_ipairs([&](int, lua_value const & v) {
             if(v.is_string()) {
-                ok == $state.AddDefault(ninja_path_read($env, v.c_str()), &e) || fatal("%s", e.c_str());
+                ok == $state->AddDefault(ninja_path_read($env, v.c_str()), &e) || fatal("%s", e.c_str());
             }
         });
     }
@@ -371,8 +371,8 @@ static bool ninja_buildlog_opened = false;
 
 void ninja_buildlog_open() {
     if(!ninja_buildlog_opened) {
-        $ninja.OpenBuildLog() || halt();
-        $ninja.OpenDepsLog() || halt();
+        $ninja->OpenBuildLog() || halt();
+        $ninja->OpenDepsLog() || halt();
 
         ninja_buildlog_opened = true;
     }
@@ -380,7 +380,7 @@ void ninja_buildlog_open() {
 
 void ninja_buildlog_close() {
     if(ninja_buildlog_opened) {
-        $ninja.build_log_.Close(); $ninja.deps_log_.Close();
+        $ninja->build_log_.Close(); $ninja->deps_log_.Close();
 
         ninja_buildlog_opened = false;
     }
@@ -402,22 +402,22 @@ void ninja_build(lua_gcptr targets) {
         }
     }
 
-    $ninja.start_time_millis_ = GetTimeMillis();
+    $ninja->start_time_millis_ = GetTimeMillis();
 
-    $ninja.EnsureBuildDirExists() || halt();
+    $ninja->EnsureBuildDirExists() || halt();
 
     ninja_buildlog_open();
 
-    if(int rc = $ninja.RunBuild(paths.size(), (char **)paths.data(), &status); rc != 0) {
+    if(int rc = $ninja->RunBuild(paths.size(), (char **)paths.data(), &status); rc != 0) {
         exit(rc);
     }
 
-    // $ninja.DumpMetrics();
-    // $ninja.build_log_.Close(); $ninja.deps_log_.Close();
+    // $ninja->DumpMetrics();
+    // $ninja->build_log_.Close(); $ninja->deps_log_.Close();
 }
 
 void ninja_clean() {
-    Cleaner cleaner(&$ninja.state_, $config, &$ninja.disk_interface_); cleaner.CleanAll(true);
+    Cleaner cleaner(&($ninja->state_), $config, &($ninja->disk_interface_)); cleaner.CleanAll(true);
 }
 
 static bool ninja_evalstring_read(const char * s, EvalString * eval, bool path) {

@@ -9,7 +9,7 @@
 void ninja_initialize();
 void ninja_finalize();
 
-static struct ninja_initializer {
+struct ninja_initializer {
     ninja_initializer() {
         ninja_initialize();
     }
@@ -17,9 +17,11 @@ static struct ninja_initializer {
     ~ninja_initializer() {
         ninja_finalize();
     }
-} __ninja_initializer;
+};
 
 int main(int argc, char ** argv) {
+    { static ninja_initializer _; }
+
     $L([&]() {
         lua_table package = $L["package"]; {
             package.def("path", "./?.lua;/zip/?.lua");
@@ -223,7 +225,7 @@ int main(int argc, char ** argv) {
 
     const char * script = (argc > 1) ? argv[1] : "build.lua";
 
-    file_exists(script) || fatal("script '%s' not found", script);
+    file_exists(script) || fatal("%s not found\n", script);
 
     $L.run(afile(script).read());
 

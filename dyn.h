@@ -49,8 +49,8 @@ struct auto_ptr {
 
     auto_ptr(auto_ptr && x) : ptr(x.ptr) { x.ptr = nullptr; }
 
-    template<typename...Args>
-    static auto_ptr make(Args &&...args) { return auto_ptr(new T(std::forward<Args>(args)...)); }
+    template<typename... Args>
+    static auto_ptr make(Args &&... args) { return auto_ptr(new T(std::forward<Args>(args)...)); }
 
     ~auto_ptr() { if(ptr) delete ptr; }
 
@@ -67,6 +67,52 @@ struct auto_ptr {
     T * operator->() const { return (T *)ptr; }
 };
 
+template<typename T>
+struct dtag {};
+
+template<typename T, typename... Args>
+struct defer_ptr {
+    T * ptr {nullptr}; std::tuple<Args...> args;
+
+    defer_ptr(dtag<T> tag, Args &&... args) : args(std::forward<Args>(args)...) {}
+
+    ~defer_ptr() { if(ptr) delete ptr; }
+
+    defer_ptr(defer_ptr const &) = delete;
+
+    defer_ptr(defer_ptr && x) = delete;
+
+    operator T *() { return get(); }
+
+    operator bool() { return ptr != nullptr; }
+
+    T * get() { if(!ptr) ptr = new T(std::get<Args>(args)...); return ptr; }
+
+    T * detach() { auto p = ptr; ptr = nullptr; return p; }
+
+    T * operator->() { return get(); }
+
+    defer_ptr & operator=(defer_ptr const &) = delete;
+
+    defer_ptr & operator=(defer_ptr && x) = delete;
+};
+
+template<typename T, typename... Args>
+defer_ptr(dtag<T>, Args &&...) -> defer_ptr<T, Args...>;
+
+template<typename T, typename F>
+struct dget {
+    F getter;
+
+    dget(dtag<T>, F && getter) : getter(std::forward<F>(getter)) {}
+
+    operator T() { return (T)getter(); }
+
+    T operator->() { return (T)getter(); }
+};
+
+template<typename T, typename F>
+dget(dtag<T>, F &&) -> dget<T, F>;
 
 struct dtimer {
     struct timer_data {
