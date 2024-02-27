@@ -79,11 +79,11 @@ local function buffer_rep(buf, str, n)
         buf:put(str)
     end
     return buf
-end
+end; _G.buffer_rep = buffer_rep
 
 local function buffer_indent(buf, indent)
     return buffer_rep(buf, ' ', indent)
-end
+end; _G.buffer_indent = buffer_indent
 
 local function pick(cond, a, b)
     if cond then return a else return b end
@@ -585,15 +585,8 @@ local function path_do_pathappend(path)
     buffer_pathappend(__buf, path)
 end
 
-local function path_do_compbine(buf, ...)
-    __buf:reset(); do
-        vargs_foreach(path_do_pathappend, ...)
-    end
-    return buffer_tostring(__buf)
-end
-
 local function path_combine(...)
-    return path_do_compbine(__buf:reset(), ...)
+    __buf:reset(); vargs_foreach(path_do_pathappend, ...); return buffer_tostring(__buf)
 end
 
 local function path_ftype(path)

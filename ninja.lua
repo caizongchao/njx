@@ -718,7 +718,11 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local objs = {}; local srcs = as_list(opts.srcs); do
                     local function add_src(src, xrules)
-                        local rule = xrules[path.extension(src)]; if rule == nil then
+                        local ext = path.extension(src); if ext == '.obj' then
+                            table.insert(objs, src); return
+                        end
+
+                        local rule = xrules[ext]; if rule == nil then
                             fatal('no rule for file: %s', src)
                         end
 
@@ -928,9 +932,9 @@ local msvc_toolchain; msvc_toolchain = object({
     target = {
         new = function(...)
             local t = extends(basic_cc_toolchain.target.new(...), msvc_toolchain.target.basic); do
-                t:cx_flags('/showIncludes /nologo /c /Fo$out /Fd$out.pdb /TP $in')
-                t:ld_flags('$in /OUT:$out')
-                t:ar_flags('/OUT:$out $in')
+                t:cx_flags('/nologo /showIncludes /c /Fo$out /Fd$out.pdb $in')
+                t:ld_flags('/nologo $in /OUT:$out')
+                t:ar_flags('/nologo /OUT:$out $in')
             end
             return t
         end,

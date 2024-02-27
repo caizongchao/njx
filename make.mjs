@@ -13,7 +13,7 @@ function run(cmd) {
     });
 }
 
-var OPT = "-O2"
+var OPT = "-O2 -g"
 
 var ninja_src = [
     'deps/ninja/src/build.cc',
@@ -220,7 +220,7 @@ async function make_libluajit() {
 
 var ljx_src = [
     "ninja_api.cpp",
-    "unwind.cpp",
+    // "unwind.cpp",
     "ljx.cpp"
 ]
 
@@ -270,7 +270,7 @@ var ljx_build_dir = 'bin/'; {
 
 async function deploy() {
     await run('zip -r bin/ljx.exe ljx.lua ninja.lua jit')
-    // await run('copy /Y bin\\ljx.exe c:\\apps\\tools\\njx.exe')
+    await run('copy /Y bin\\ljx.exe c:\\apps\\tools\\njx.exe')
 }
 
 async function make_ljx() {
@@ -282,7 +282,7 @@ async function make_ljx() {
         console.log('linking ljx.exe');
         
         // let r = await run('cosmoc++ -Wl,--start-group -u ninja_initialize -L build lj_vm.o -lluajit -lljx -lninja -Wl,--end-group -o ' + ljx_build_dir + 'ljx.exe');
-        let r = await run('cosmoc++ -Wl,--start-group -L build lj_vm.o -lluajit -lljx -lninja -Wl,--end-group -o ' + ljx_build_dir + 'ljx.exe');
+        let r = await run(`cosmoc++ -std=c++20 ${OPT} -Wl,--start-group -L build deps/luajit/src/lj_vm.o -lluajit -lljx -lninja -Wl,--end-group -o `+ ljx_build_dir + 'ljx.exe');
 
         if(r) {
             deploy();
