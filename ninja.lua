@@ -29,7 +29,8 @@ ffi.cdef [[
     void ninja_rule_add(const char * name, gcptr vars);
     void ninja_edge_add(gcptr outputs, const char * rule_name, gcptr inputs, gcptr vars);
     void ninja_default_add(gcptr defaults);
-    void ninja_build(gcptr targets);
+    void ninja_exit_on_error(int b);
+    int ninja_build(gcptr targets);
     void ninja_clean();
 ]]
 
@@ -76,121 +77,99 @@ local function as_list(x)
     if type(x) == 'table' then return x else return { x } end
 end
 
+local function as_xlist(x)
+    if xtype(x) == 'table' then return x else return { x } end
+end
+
+local function public(t)
+    return table.tag(t, 'public')
+end; _G.public = public
+
 local function options_map(t, fx)
     return table.mapk(t, function(k)
-        if k == 'public' then return k else return fx(k) end
+        return fx(k)
     end)
 end
 
 local function options_foreach(t, fx)
-    if t == nil then return end
-
-    for k, x in pairs(t) do
-        if k == 'public' then goto continue end
-
+    for k, x in pairs(as_list(t)) do
         if type(k) == 'number' then
             if type(x) == 'table' then
                 options_foreach(x, fx)
             else
-                fx(x)
+                fx(nil, x)
             end
         else
-            if x ~= false then
+            if type(x) == 'boolean' then
+                if x then
+                    fx(nil, k)
+                end
+            else
                 fx(k, x)
             end
         end
-
-        ::continue::
     end
+    return t
 end
 
-local function options_merge(tout, tin, ...)
-    if not tin then return tout end
-    for k, x in pairs(as_list(tin)) do
-        if k == 'public' then
-            goto continue
-        elseif type(k) == 'number' then
-            if type(x) == 'table' then
-                options_merge(tout, x)
-            else
+local function options_merge(tout, ...)
+    vargs_foreach(function(tin)
+        options_foreach(tin, function(k, x)
+            if k == nil then
                 table.insert(tout, x)
+            else
+                tout[k] = x
             end
-        elseif x == false then
-            tout[k] = nil
-        else
-            tout[k] = x
-        end
-        ::continue::
-    end
-    return options_merge(tout, ...)
+        end)
+    end, ...)
+    return tout
 end
 
-local function options_public_merge(tout, tin, ...)
-    if not tin then return tout end
-    if type(tin) == 'table' then
-        if tin.public then
+local function options_public_merge(tout, ...)
+    vargs_foreach(function(tin)
+        if type(tin) ~= 'table' then return end
+
+        if xtype(tin) == 'public' then
             options_merge(tout, tin)
         else
-            for k, x in pairs(tin) do
-                if type(k) == 'number' then
-                    if type(x) == 'table' then
-                        options_public_merge(tout, x)
-                    end
-                elseif type(k) == 'table' and x then
-                    options_public_merge(tout, k)
+            options_foreach(tin, function(k, x)
+                if k == nil then
+                    options_public_merge(tout, x)
                 end
-            end
+            end)
         end
-    end
-    return options_public_merge(tout, ...)
+    end, ...)
+    return tout
 end
 
 local function options_tobuf(buf, t)
-    if type(t) ~= 'table' then
-        buf:put(t, ' ')
-    else
-        for k, x in pairs(t) do
-            if k == 'public' then
-                goto continue
-            elseif type(k) == 'number' then
-                if type(x) == 'table' then
-                    options_tobuf(buf, x)
-                else
-                    buf:put(x, ' ')
-                end
-            elseif type(x) == 'boolean' then
-                if x == true then
-                    buf:put(k, ' ')
-                end
-            else
-                buf:put(k, '=', x, ' ')
-            end
-            ::continue::
+    options_foreach(t, function(k, x)
+        if k == nil then
+            buf:put(x, ' ')
+        else
+            buf:put(k, '=', x, ' ')
         end
-    end
+    end)
     return buf
 end
 
 local function options_tostring(...)
-    local buf = __buf:reset(); vargs_foreach(function(x)
+    local buf = __buf:reset()
+    vargs_foreach(function(x)
         options_tobuf(buf, x)
     end, ...)
     return buf:tostring()
 end
 
 local function options_pick(t, ...)
-    local c = select('#', ...)
-    local r = {}
-
+    local r, c = {}, select('#', ...)
     for i = 1, c do
-        local x = select(i, ...)
-        if x then
+        local x = select(i, ...); if x then
             local a = t[x]; if a then
                 table.insert(r, a)
             end
         end
     end
-
     return r
 end
 
@@ -343,6 +322,15 @@ end
 
 ninja.tool = {
 }
+
+local DEFAULT_CCACHE = 'sccache'
+local NO_CCACHE = ''; _G.NO_CCACHE = NO_CCACHE
+
+ninja.ccache = NO_CCACHE
+
+local function ccache()
+    return ninja.ccache or DEFAULT_CCACHE
+end
 
 local basic_toolchain; basic_toolchain = object({
     target = {
@@ -510,10 +498,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local dirs = ensure_field(self.opts, 'include_dirs', {})
                 vargs_foreach(function(dir)
                     table.merge(dirs, options_map(as_list(dir), function(x)
-                        if not x:starts_with('-I') then
-                            x = '-I' .. x
-                        end
-                        return x
+                        return self:make_flag('include_dir', x)
                     end))
                 end, ...)
                 return self
@@ -523,10 +508,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local incs = ensure_field(self.opts, 'includes', {})
                 vargs_foreach(function(inc)
                     table.merge(incs, options_map(as_list(inc), function(x)
-                        if not x:starts_with('-include ') then
-                            x = '-include ' .. x
-                        end
-                        return x
+                        return self:make_flag('include', x)
                     end))
                 end, ...)
                 return self
@@ -536,10 +518,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local dirs = ensure_field(self.opts, 'lib_dirs', {})
                 vargs_foreach(function(dir)
                     table.merge(dirs, options_map(as_list(dir), function(x)
-                        if not x:starts_with('-L') then
-                            x = '-L' .. x
-                        end
-                        return x
+                        return self:make_flag('lib_dir', x)
                     end))
                 end, ...)
                 return self
@@ -549,12 +528,17 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local libs = ensure_field(self.opts, 'libs', {})
                 vargs_foreach(function(lib)
                     table.merge(libs, options_map(as_list(lib), function(x)
-                        if not x:starts_with('-l') then
-                            x = '-l' .. x
-                        end
-                        return x
+                        return self:make_flag('lib', x)
                     end))
                 end, ...)
+                return self
+            end,
+
+            debug = function(self, b)
+                if b then
+                    self:cx_flags(self:make_flag('debug_cc'))
+                    self:ld_flags(self:make_flag('debug_ld'))
+                end
                 return self
             end,
 
@@ -562,10 +546,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local defs = ensure_field(self.opts, 'defines', {})
                 vargs_foreach(function(def)
                     table.merge(defs, options_map(as_list(def), function(x)
-                        if not x:starts_with('-D') then
-                            x = '-D' .. x
-                        end
-                        return x
+                        return self:make_flag('define', x)
                     end))
                 end, ...)
                 return self
@@ -607,6 +588,14 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local xs = ensure_field(self.opts, 'ar_flags', {})
                 vargs_foreach(function(flags)
                     table.merge(xs, as_list(flags))
+                end, ...)
+                return self
+            end,
+
+            onbuild = function(self, ...)
+                local fxs = ensure_field(self, 'onbuild_actions', {})
+                vargs_foreach(function(fx)
+                    table.merge(fxs, as_list(fx))
                 end, ...)
                 return self
             end,
@@ -680,7 +669,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local cc_rule_name = symgen(self.name .. '_cc_'); do
                     C.ninja_rule_add(cc_rule_name, {
-                        command = options_tostring(self.cc, c_options),
+                        command = options_tostring(ccache(), self.cc, c_options),
                         depfile = '$out.d',
                         deps = dep_type,
                         description = 'CC $out',
@@ -692,7 +681,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local cxx_rule_name = symgen(self.name .. '_cxx_'); do
                     C.ninja_rule_add(cxx_rule_name, {
-                        command = options_tostring(self.cxx, cxx_options),
+                        command = options_tostring(ccache(), self.cxx, cxx_options),
                         depfile = '$out.d',
                         deps = dep_type,
                         description = 'CXX $out',
@@ -784,7 +773,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                 if file_is_typeof(src, c_file_extensions) then
                                     local cc_rule_name = symgen(self.name .. '_cc_'); do
                                         C.ninja_rule_add(cc_rule_name, {
-                                            command = options_tostring(self.cc,
+                                            command = options_tostring(ccache(), self.cc,
                                                 options_merge({}, c_options, options_pick(xopts, unpack(c_option_fields)))),
                                             depfile = '$out.d',
                                             deps = dep_type,
@@ -799,7 +788,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                 if file_is_typeof(src, cxx_file_extensions) then
                                     local cxx_rule_name = symgen(self.name .. '_cxx_'); do
                                         C.ninja_rule_add(cxx_rule_name, {
-                                            command = options_tostring(self.cxx,
+                                            command = options_tostring(ccache(), self.cxx,
                                                 options_merge({}, cxx_options,
                                                     options_pick(xopts, unpack(cxx_option_fields)))),
                                             depfile = '$out.d',
@@ -853,7 +842,13 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 setupaction_run(self.opts.setup, 'build')
 
                 if self.output then
-                    C.ninja_build(self.output)
+                    if C.ninja_build(self.output) == 0 then
+                        if self.onbuild_actions then
+                            for _, fx in ipairs(self.onbuild_actions) do
+                                fx(self)
+                            end
+                        end
+                    end
                 end
             end,
 
@@ -888,11 +883,14 @@ local gcc_toolchain; gcc_toolchain = object({
 
             flag_map = {
                 std = '-std=',
+                define = '-D',
                 include_dir = '-I',
                 include = '-include ',
                 lib_dir = '-L',
                 lib = '-l',
                 shared = '-shared',
+                debug_cc = '-g',
+                debug_ld = '-g',
             },
         },
     },
@@ -924,6 +922,10 @@ local clang_toolchain; clang_toolchain = object({
             cxx = 'clang++',
             ar = 'llvm-ar',
             ld = 'clang++',
+
+            flag_map = extends({}, gcc_toolchain.target.basic.flag_map, {
+                debug_cc = '-g -gcodeview',
+            }),
         },
     },
 }); ninja.toolchains.clang = clang_toolchain
@@ -932,7 +934,8 @@ local msvc_toolchain; msvc_toolchain = object({
     target = {
         new = function(...)
             local t = extends(basic_cc_toolchain.target.new(...), msvc_toolchain.target.basic); do
-                t:cx_flags('/nologo /showIncludes /c /Fo$out /Fd$out.pdb $in')
+                -- t:cx_flags('/nologo /showIncludes /c /Fo$out /Fd$out.pdb $in')
+                t:cx_flags('/nologo /showIncludes /c /Fo$out $in')
                 t:ld_flags('/nologo $in /OUT:$out')
                 t:ar_flags('/nologo /OUT:$out $in')
             end
@@ -953,11 +956,14 @@ local msvc_toolchain; msvc_toolchain = object({
 
             flag_map = {
                 std = '/std:',
+                define = '-D',
                 include_dir = '/I',
                 include = '/FI',
                 lib_dir = '/LIBPATH:',
                 lib = '',
                 shared = '/DLL',
+                debug_cc = '/Zi',
+                debug_ld = '/DEBUG /INCREMENTAL:NO',
             },
         },
     },
@@ -1053,16 +1059,57 @@ function ninja.clean(...)
     end, ...)
 end
 
-function ninja.watch(dir, ...)
+function ninja.reset()
+    C.ninja_reset()
+end
+
+function ninja.exit_on_error(b)
+    C.ninja_exit_on_error(b)
+end
+
+function ninja.watch(dir, wildcard, ...)
     local targets = {}; vargs_foreach(function(target)
-        vargs_foreach(function(t)
-            table.insert(targets, t)
-        end, ninja.target_of(target))
+        if type(target) == 'function' then
+            targets = target
+        else
+            vargs_foreach(function(t)
+                table.insert(targets, t)
+            end, ninja.target_of(target))
+        end
     end, ...)
 
-    fs.watch(dir, function()
-        ninja.build(unpack(targets))
+    local is_building = false; fs.watch(dir, function(x)
+        local xmatch; x = path.fname(x)
+
+        for _, w in ipairs(as_list(wildcard)) do
+            if path.ifnmatch(w, x) then
+                xmatch = true; break
+            end
+        end
+
+        if xmatch then
+            if is_building == false then
+                is_building = true; set_timeout(300, function()
+                    ninja.reset()
+
+                    local now = _G.clock()
+
+                    if type(targets) == 'function' then
+                        targets()
+                    else
+                        ninja.build(unpack(targets))
+                    end
+
+                    print(string.format('build time: %.3fs', (_G.clock() - now) / 1000))
+
+                    is_building = false; print('watching...')
+                end)
+                return 'break'
+            end
+        end
     end)
+
+    _G.run()
 end
 
 return ninja

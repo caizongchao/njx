@@ -151,6 +151,8 @@ struct lua_table {
         reasize(nasize); return nasize;
     }
 
+    GCtab * operator->() const { return value; }
+
     operator GCtab *() const { return value; }
 
     operator bool() const { return value != nullptr; }
@@ -367,6 +369,12 @@ struct lua_state {
     ~lua_state() { if(L) lua_close(L); }
 
     operator lua_State *() const { return L; }
+
+    int argc() const { return lua_gettop(L); }
+
+    lua_value * argv() const { return (lua_value *)(L->base); }
+
+    lua_value & argv(int idx) const { return (lua_value &)(argv()[idx]); }
 
     // global
     lua_table _G() const { return {tabref(L->env)}; }

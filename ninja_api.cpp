@@ -386,7 +386,13 @@ void ninja_buildlog_close() {
     }
 }
 
-void ninja_build(lua_gcptr targets) {
+static bool __exit_on_error = true;
+
+void ninja_exit_on_error(bool b) {
+    __exit_on_error = b;
+}
+
+int ninja_build(lua_gcptr targets) {
     StatusPrinter status($config); std::vector<const char *> paths;
 
     if(targets) {
@@ -408,9 +414,13 @@ void ninja_build(lua_gcptr targets) {
 
     ninja_buildlog_open();
 
-    if(int rc = $ninja->RunBuild(paths.size(), (char **)paths.data(), &status); rc != 0) {
-        exit(rc);
+    int rc = $ninja->RunBuild(paths.size(), (char **)paths.data(), &status);
+
+    if(rc > 0) {
+        if(__exit_on_error) exit(rc);
     }
+
+    return rc;
 
     // $ninja->DumpMetrics();
     // $ninja->build_log_.Close(); $ninja->deps_log_.Close();
@@ -638,7 +648,7 @@ void buffer_pathappend(lua_gcptr buf, lua_gcptr path) {
 }
 
 lua_gcptr buffer_tostring(lua_gcptr buf) {
-    auto sbufx = (SBufExt *)buf; return {lua_string(sbufx->r, sbufxlen(sbufx))};
+    auto sbuf = (SBuf *)buf; return {lua_string(sbuf->b, sbuflen(sbuf))};
 }
 
 struct clib_sym_t {
@@ -670,6 +680,7 @@ static clib_sym_t __clib_syms[] = {
     CLIB_SYM(ninja_edge_add),
     CLIB_SYM(ninja_rule_add),
     CLIB_SYM(ninja_default_add),
+    CLIB_SYM(ninja_exit_on_error),
     CLIB_SYM(ninja_build),
     CLIB_SYM(ninja_clean),
     {0, 0}};
@@ -686,6 +697,7 @@ void ninja_initialize() {
     g_metrics = new Metrics();
 
     $config.parallelism = GetProcessorCount();
+
     ninja_var_set("builddir", DEFAULT_BUILD_DIR);
 }
 

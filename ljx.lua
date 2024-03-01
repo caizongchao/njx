@@ -33,15 +33,14 @@ local ok, yes = assert, assert; _G.ok = ok; _G.yes = yes
 local function xtype(a, x)
     if x == nil then
         local t = type(a); if t == 'table' then
-            local tt = a[0]; if tt ~= nil then
+            local tt = table.tag(a); if tt ~= nil then
                 t = tt
             end
         end
         return t
     else
         assert(type(a) == 'table', 'xtype target must be a table')
-
-        a[0] = x; return a
+        table.tag(a, x); return a
     end
 end; _G.xtype = xtype
 
@@ -356,7 +355,7 @@ ffi.cdef [[
     typedef void* HANDLE;
     typedef void* LPVOID;
     typedef unsigned int UINT;
-    typedef wchar_t WCHAR;
+    typedef uint16_t WCHAR;
     typedef WCHAR* LPWSTR;
     typedef const WCHAR* LPCWSTR;
     typedef char* LPSTR;
@@ -381,8 +380,8 @@ ffi.cdef [[
         DWORD nFileSizeLow;
         DWORD dwReserved0;
         DWORD dwReserved1;
-        wchar_t cFileName[260];
-        wchar_t cAlternateFileName[14];
+        WCHAR cFileName[260];
+        WCHAR cAlternateFileName[14];
     } WIN32_FIND_DATAW;
 
     typedef struct _OVERLAPPED {
@@ -410,6 +409,9 @@ ffi.cdef [[
 
     int GetLastError();
 
+    int lstrlenA(LPCSTR lpString);
+    int lstrlenW(LPCWSTR lpString);
+
     UINT MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCSTR lpMultiByteStr, int cbMultiByte, LPWSTR lpWideCharStr, int cchWideChar);
     UINT WideCharToMultiByte(UINT CodePage, DWORD dwFlags, LPCWSTR lpWideCharStr, int cchWideChar, LPSTR lpMultiByteStr, int cbMultiByte, LPCSTR lpDefaultChar, LPBOOL lpUsedDefaultChar);
 
@@ -418,7 +420,7 @@ ffi.cdef [[
     int CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPVOID lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, int hTemplateFile);
     BOOL CloseHandle(int hObject);
 
-    int FindFirstFileW(const wchar_t* lpFileName, WIN32_FIND_DATAW* lpFindFileData);
+    int FindFirstFileW(const WCHAR* lpFileName, WIN32_FIND_DATAW* lpFindFileData);
     int FindNextFileW(int hFindFile, WIN32_FIND_DATAW* lpFindFileData);
     int FindClose(int hFindFile);
 
@@ -446,6 +448,9 @@ local INVALID_HANDLE_VALUE = -1
 
 local GetLastError = kernel32.GetLastError
 
+local lstrlenA = kernel32.lstrlenA
+local lstrlenW = kernel32.lstrlenW
+
 local MultiByteToWideChar = kernel32.MultiByteToWideChar
 local WideCharToMultiByte = kernel32.WideCharToMultiByte
 
@@ -472,19 +477,22 @@ local CreateIoCompletionPort = kernel32.CreateIoCompletionPort
 local GetQueuedCompletionStatus = kernel32.GetQueuedCompletionStatus
 local PostQueuedCompletionStatus = kernel32.PostQueuedCompletionStatus
 
-local __wstr = ffi.new('WCHAR[?]', 16 * 1024)
-local __str = ffi.new('char[?]', 16 * 1024)
+local STRBUFFER_SIZE = 16 * 1024
 
-local function u82w(str)
-    local len = MultiByteToWideChar(65001, 0, str, -1, nil, 0)
-    MultiByteToWideChar(65001, 0, str, -1, __wstr, len)
-    return __wstr
+local __wstr = ffi.new('WCHAR[?]', STRBUFFER_SIZE)
+local __str = ffi.new('char[?]', STRBUFFER_SIZE)
+
+local function w2u8(wstr, cch)
+    cch = cch or lstrlenW(wstr)
+    local c = WideCharToMultiByte(65001, 0, wstr, cch, __str, STRBUFFER_SIZE, nil, nil)
+    local s = ffi.string(__str, c)
+    return s
 end
 
-local function w2u8(wstr)
-    local len = WideCharToMultiByte(65001, 0, wstr, -1, nil, 0, nil, nil)
-    WideCharToMultiByte(65001, 0, wstr, -1, __str, len, nil, nil)
-    return ffi.string(__str)
+local function u82w(str, cch)
+    cch = cch or lstrlenA(str)
+    __wstr[MultiByteToWideChar(65001, 0, str, cch, __wstr, STRBUFFER_SIZE)] = 0
+    return __wstr
 end
 
 local function path_quote(path)
@@ -533,27 +541,19 @@ local function path_parent(path)
 end
 
 local function path_fname(path)
-    local i = path:find('[/\\][^/\\]*$')
-    if i then
-        return path:sub(i + 1)
-    else
-        return nil
-    end
+    return path:match("^.+[\\/](.+)$") or path
 end
 
 local function path_dfname(path)
-    local i = path:find('[/\\][^/\\]*$')
-    if i then
-        return path_add_backslash_to_drive(path:sub(1, i - 1)), path:sub(i + 1)
-    else
-        return path_add_backslash_to_drive(path), nil
-    end
+    local directory = path:match("^(.+)/")
+    local filename = path:match("/([^/]+)$") or path
+    return directory, filename
 end
 
-local function path_extension(path)
-    local i = path:find('[.]%w+$')
+local function path_extension(xpath)
+    local i = xpath:find('[^%.]%.[%w]+$')
     if i then
-        return path:sub(i)
+        return xpath:sub(i + 1)
     else
         return ''
     end
@@ -658,7 +658,7 @@ local function directory_walk(path, opts)
         fx = opts
     end
 
-    wildcard = wildcard or '*'
+    path = path or '.'; wildcard = wildcard or '*'
 
     local stack = { path }; while #stack > 0 do
         local dir = stack[#stack]; stack[#stack] = nil
@@ -851,13 +851,13 @@ local function iocp_on_complete(completionKey, overlapped)
         i = tonumber(completionKey)
     end
 
-    local x = iocp_registry[i]; if type(x) == "function" then
+    local x = iocp_registry[i]; iocp_registry:unregister(i)
+
+    if type(x) == "function" then
         x()
     else -- t == "table"
         emit(x[1], unpack(x, 2))
     end
-
-    iocp_registry:unregister(i)
 end
 
 local iocp_lpNumberOfBytes = ffi.new("intptr_t[1]")
@@ -886,41 +886,55 @@ local function poll()
 end; _G.poll = poll
 
 -- fs watch file changes
+local FS_WATCH_DEBOUNCE = 1000
+
 local function fs_watch(dir, fx)
     local hdir = CreateFileW(u82w(dir), 0x0001, 0x0007, nil, 3, 0x42000000, 0); ok(hdir ~= INVALID_HANDLE_VALUE)
     local h = CreateIoCompletionPort(hdir, IOCP, 0, 0); ok(h == IOCP)
 
-    local BUFFER_SIZE = 16 * 1024
+    local BUFFER_SIZE = 1024
 
-    local buf = ffi.new("char[?]", BUFFER_SIZE)
-    local lpBytesReturned = ffi.new("DWORD[1]")
-    local lpOverlapped = ffi.new("OVERLAPPED[1]")
+    local buf = ffi.new('char[?]', BUFFER_SIZE)
+    local lpBytesReturned = ffi.new('DWORD[1]')
+    local lpOverlapped = ffi.new('OVERLAPPED[1]')
 
     local overlapped = lpOverlapped[0]
 
-    local on_change; on_change = function()
-        local p = buf; while true do
-            local info = ffi.cast("FILE_NOTIFY_INFORMATION*", p)
-            local filename = w2u8(info.FileName)
-            if filename ~= '.' and filename ~= '..' then
-                fx(path.combine(dir, filename))
+    local last_change_time = 0
+
+    local read_change, on_change; on_change = function()
+        local now = _G.clock()
+
+        if (last_change_time == 0) or ((now - last_change_time) > FS_WATCH_DEBOUNCE) then
+            last_change_time = now
+
+            local p = buf; while true do
+                local info = ffi.cast("FILE_NOTIFY_INFORMATION*", p)
+                local filename = w2u8(info.FileName, info.FileNameLength / 2)
+
+                if filename ~= '.' and filename ~= '..' then
+                    if fx(path.combine(dir, filename)) == 'break' then
+                        break
+                    end
+                end
+                if info.NextEntryOffset == 0 then
+                    break
+                end
+                p = p + info.NextEntryOffset
             end
-            if info.NextEntryOffset == 0 then
-                break
-            end
-            p = p + info.NextEntryOffset
         end
 
+        read_change()
+    end
+
+    read_change = function()
         overlapped.data = iocp_registry:register(on_change)
 
         ok(ReadDirectoryChangesW(hdir, buf, BUFFER_SIZE, 1, FILE_NOTIFY_CHANGE_LAST_WRITE, lpBytesReturned, lpOverlapped,
             nil) ~= 0)
     end
 
-    overlapped.data = iocp_registry:register(on_change)
-
-    ok(ReadDirectoryChangesW(hdir, buf, BUFFER_SIZE, 1, FILE_NOTIFY_CHANGE_LAST_WRITE, lpBytesReturned, lpOverlapped, nil) ~=
-        0)
+    fx('.'); set_timeout(FS_WATCH_DEBOUNCE, read_change)
 end; fs.watch = fs_watch
 
 -- fs_watch('r:/temp', function(fname)

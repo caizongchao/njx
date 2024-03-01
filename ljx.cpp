@@ -5,6 +5,7 @@
 #include "fnmatch.h"
 
 #include <filesystem>
+#include <chrono>
 
 void ninja_initialize();
 void ninja_finalize();
@@ -31,6 +32,10 @@ int main(int argc, char ** argv) {
 
         _G
             .def("__registry", $L._R())
+            .def(
+                "clock", (lua_CFunction)[](lua_State * L)->int {
+                    lua_pushinteger(L, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()); return 1;
+                })
             .def(
                 "exec", (lua_CFunction)[](lua_State * L)->int {
                     int argc = lua_gettop(L); {
@@ -72,6 +77,23 @@ int main(int argc, char ** argv) {
                     waitpid(pid, &status, 0);
 
                     lua_pushinteger(L, status);
+
+                    return 1;
+                });
+
+        lua_table($L["table"])
+            .def(
+                "tag", (lua_CFunction)[](lua_State * L) {
+                    int argc = $L.argc();
+
+                    if(argc == 0) return 0;
+
+                    lua_table t = $L.argv(0); if(argc > 1) {
+                        t->tag = $L.argv(1); $L.push(t);
+                    }
+                    else {
+                        $L.push(t->tag);
+                    }
 
                     return 1;
                 });

@@ -18,5 +18,10 @@ int main() {
         FILE_FLAG_BACKUP_SEMANTICS | (fASync ? FILE_FLAG_OVERLAPPED : 0),
         NULL);
 
+
+// FILE_NOTIFY_CHANGE_LAST_WRITE
+
+    int x = FILE_NOTIFY_CHANGE_LAST_WRITE;
+
     return 0;
 }
