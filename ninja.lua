@@ -110,10 +110,13 @@ local function options_map(t, fx)
     local r = {}; options_foreach(t, function(k, x)
         k, x = fx(k, x); if k == nil then
             table.insert(r, x)
+        elseif x == nil then
+            table.insert(r, k)
         else
             r[k] = x
         end
     end)
+    return r
 end
 
 local function options_merge(tout, ...)
@@ -121,6 +124,8 @@ local function options_merge(tout, ...)
         options_foreach(tin, function(k, x)
             if k == nil then
                 table.insert(tout, x)
+            elseif x == nil then
+                table.insert(tout, k)
             else
                 tout[k] = x
             end
@@ -437,10 +442,18 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
         basic = {
             make_flag = function(self, k, v)
-                local x = self.flag_map[k]; if x == nil then
-                    x = self.flag_switch .. k
+                if k == nil and v ~= nil then
+                    k, v = v, k
                 end
-                return (v == nil) and x or (x .. v)
+
+                if string.starts_with(k, self.flag_switch) then
+                    return (v == nil) and k or (k .. v)
+                else
+                    local x = self.flag_map[k]; if x == nil then
+                        x = self.flag_switch .. k
+                    end
+                    return (v == nil) and x or (x .. v)
+                end
             end,
 
             deps = function(self, ...)
@@ -504,9 +517,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local dirs = ensure_field(self.opts, 'include_dirs', {})
                 vargs_foreach(function(dir)
                     table.insert(dirs, dir)
-                    -- table.merge(dirs, options_map(as_list(dir), function(x)
-                    --     return self:make_flag('include_dir', x)
-                    -- end))
                 end, ...)
                 return self
             end,
@@ -515,9 +525,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local incs = ensure_field(self.opts, 'includes', {})
                 vargs_foreach(function(inc)
                     table.insert(incs, inc)
-                    -- table.merge(incs, options_map(as_list(inc), function(x)
-                    --     return self:make_flag('include', x)
-                    -- end))
                 end, ...)
                 return self
             end,
@@ -526,9 +533,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local dirs = ensure_field(self.opts, 'lib_dirs', {})
                 vargs_foreach(function(dir)
                     table.insert(dirs, dir)
-                    -- table.merge(dirs, options_map(as_list(dir), function(x)
-                    --     return self:make_flag('lib_dir', x)
-                    -- end))
                 end, ...)
                 return self
             end,
@@ -537,9 +541,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local libs = ensure_field(self.opts, 'libs', {})
                 vargs_foreach(function(lib)
                     table.insert(libs, lib)
-                    -- table.merge(libs, options_map(as_list(lib), function(x)
-                    --     return self:make_flag('lib', x)
-                    -- end))
                 end, ...)
                 return self
             end,
@@ -556,9 +557,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local defs = ensure_field(self.opts, 'defines', {})
                 vargs_foreach(function(def)
                     table.insert(defs, def)
-                    -- table.merge(defs, options_map(as_list(def), function(x)
-                    --     return self:make_flag('define', x)
-                    -- end))
                 end, ...)
                 return self
             end,
@@ -567,7 +565,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local xs = ensure_field(self.opts, 'c_flags', {})
                 vargs_foreach(function(flags)
                     table.insert(xs, flags)
-                    -- table.merge(xs, as_list(flags))
                 end, ...)
                 return self
             end,
@@ -576,7 +573,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local xs = ensure_field(self.opts, 'cx_flags', {})
                 vargs_foreach(function(flags)
                     table.insert(xs, flags)
-                    -- table.merge(xs, as_list(flags))
                 end, ...)
                 return self
             end,
@@ -585,7 +581,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local xs = ensure_field(self.opts, 'cxx_flags', {})
                 vargs_foreach(function(flags)
                     table.insert(xs, flags)
-                    -- table.merge(xs, as_list(flags))
                 end, ...)
                 return self
             end,
@@ -594,7 +589,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local xs = ensure_field(self.opts, 'ld_flags', {})
                 vargs_foreach(function(flags)
                     table.insert(xs, flags)
-                    -- table.merge(xs, as_list(flags))
                 end, ...)
                 return self
             end,
@@ -603,7 +597,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local xs = ensure_field(self.opts, 'ar_flags', {})
                 vargs_foreach(function(flags)
                     table.insert(xs, flags)
-                    -- table.merge(xs, as_list(flags))
                 end, ...)
                 return self
             end,
@@ -654,12 +647,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     mergefx(ar_flags, dep.opts.ar_flags)
                 end)
 
-                print(inspect(cx_flags));
-
-                os.exit()
-
-                local option_switch = self.flag_switch
-
                 local defines_options = options_map(defines, function(k, v)
                     return self:make_flag('define', option_from_kv(k, v))
                 end)
@@ -674,6 +661,26 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local lib_dirs_options = options_map(lib_dirs, function(k, v)
                     return self:make_flag('lib_dir', option_from_kv(k, v))
+                end)
+
+                local c_flags_options = options_merge(options_map(c_flags, function(k, v)
+                    return self:make_flag(k, v)
+                end), defines_options, include_dirs_options, include_options)
+
+                local cx_flags_options = options_merge(options_map(cx_flags, function(k, v)
+                    return self:make_flag(k, v)
+                end), defines_options, include_dirs_options, include_options)
+
+                local cxx_flags_options = options_merge(options_map(cxx_flags, function(k, v)
+                    return self:make_flag(k, v)
+                end), defines_options, include_dirs_options, include_options)
+
+                local ld_flags_options = options_merge(options_map(ld_flags, function(k, v)
+                    return self:make_flag(k, v)
+                end), lib_dirs_options)
+
+                local ar_flags_options = options_map(ar_flags, function(k, v)
+                    return self:make_flag(k, v)
                 end)
 
                 local rules = {}
