@@ -630,7 +630,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     self.output = output
                 end
 
-                local defines, include_dirs, include, lib_dirs = {}, {}, {}, {}
+                local defines, include_dirs, include, lib_dirs, libs = {}, {}, {}, {}, {}
                 local c_flags, cx_flags, cxx_flags, ld_flags, ar_flags = {}, {}, {}, {}, {}
 
                 ninja.deps_foreach(self, function(dep)
@@ -640,6 +640,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     mergefx(include_dirs, dep.opts.include_dirs)
                     mergefx(include, dep.opts.includes)
                     mergefx(lib_dirs, dep.opts.lib_dirs)
+                    mergefx(libs, dep.opts.libs)
                     mergefx(c_flags, dep.opts.c_flags)
                     mergefx(cx_flags, dep.opts.cx_flags)
                     mergefx(cxx_flags, dep.opts.cxx_flags)
@@ -663,25 +664,33 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     return self:make_flag('lib_dir', option_from_kv(k, v))
                 end)
 
+                local libs_options = options_map(libs, function(k, v)
+                    return self:make_flag('lib', option_from_kv(k, v))
+                end)
+
                 local cx_options = options_merge(options_map(cx_flags, function(k, v)
                     return self:make_flag(k, v)
                 end), defines_options, include_dirs_options, include_options)
 
-                local c_options = options_merge(options_map(c_flags, function(k, v)
+                local c_options = options_merge(cx_options, options_map(c_flags, function(k, v)
                     return self:make_flag(k, v)
-                end), cx_options, defines_options, include_dirs_options, include_options)
+                end))
+                self.c_options = c_options
 
-                local cxx_options = options_merge(options_map(cxx_flags, function(k, v)
+                local cxx_options = options_merge(cx_options, options_map(cxx_flags, function(k, v)
                     return self:make_flag(k, v)
-                end), cx_options, defines_options, include_dirs_options, include_options)
+                end))
+                self.cxx_options = cxx_options
 
                 local ld_options = options_merge(options_map(ld_flags, function(k, v)
                     return self:make_flag(k, v)
-                end), lib_dirs_options)
+                end), lib_dirs_options, libs_options)
+                self.ld_options = ld_options
 
                 local ar_options = options_map(ar_flags, function(k, v)
                     return self:make_flag(k, v)
                 end)
+                self.ar_options = ar_options
 
                 local rules = {}
 
@@ -1096,7 +1105,10 @@ function ninja.targets_foreach(targets, fx)
 end
 
 function ninja.deps_foreach(target, fx)
-    local ctx = {}; target_walk(target, fx, ctx)
+    local ctx = {}; fx(target)
+    target_walk(target, function(t)
+        if t ~= target then fx(t) end
+    end, ctx)
 end
 
 function ninja.build(...)
