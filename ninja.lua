@@ -663,23 +663,23 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     return self:make_flag('lib_dir', option_from_kv(k, v))
                 end)
 
-                local c_flags_options = options_merge(options_map(c_flags, function(k, v)
+                local cx_options = options_merge(options_map(cx_flags, function(k, v)
                     return self:make_flag(k, v)
                 end), defines_options, include_dirs_options, include_options)
 
-                local cx_flags_options = options_merge(options_map(cx_flags, function(k, v)
+                local c_options = options_merge(options_map(c_flags, function(k, v)
                     return self:make_flag(k, v)
-                end), defines_options, include_dirs_options, include_options)
+                end), cx_options, defines_options, include_dirs_options, include_options)
 
-                local cxx_flags_options = options_merge(options_map(cxx_flags, function(k, v)
+                local cxx_options = options_merge(options_map(cxx_flags, function(k, v)
                     return self:make_flag(k, v)
-                end), defines_options, include_dirs_options, include_options)
+                end), cx_options, defines_options, include_dirs_options, include_options)
 
-                local ld_flags_options = options_merge(options_map(ld_flags, function(k, v)
+                local ld_options = options_merge(options_map(ld_flags, function(k, v)
                     return self:make_flag(k, v)
                 end), lib_dirs_options)
 
-                local ar_flags_options = options_map(ar_flags, function(k, v)
+                local ar_options = options_map(ar_flags, function(k, v)
                     return self:make_flag(k, v)
                 end)
 
@@ -696,35 +696,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                         rules[ext] = tool_rulename
                     end
                 end
-
-                local c_options = options_merge({}, options_pick(opts, unpack(c_option_fields)))
-
-                if opts.deps then
-                    for _, dep in ipairs(opts.deps) do
-                        local dopts = dep.opts
-                        options_public_merge(c_options, options_pick(dopts, unpack(c_option_fields)))
-                    end
-                end
-
-                local cxx_options = options_merge({}, options_pick(opts, unpack(cxx_option_fields)))
-
-                if opts.deps then
-                    for _, dep in ipairs(opts.deps) do
-                        local dopts = dep.opts
-                        options_public_merge(cxx_options, options_pick(dopts, unpack(cxx_option_fields)))
-                    end
-                end
-
-                local ld_options = options_merge({}, options_pick(opts, unpack(ld_option_fields)))
-
-                if opts.deps then
-                    for _, dep in ipairs(opts.deps) do
-                        local dopts = dep.opts
-                        options_public_merge(ld_options, options_pick(dopts, unpack(ld_option_fields)))
-                    end
-                end
-
-                local ar_options = options_merge({}, options_pick(opts, 'ar_flags'))
 
                 local rule_postfix = self.rule_postfix
                 local dep_type = self.dep_type
@@ -769,7 +740,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local objs = {}; local srcs = as_list(opts.srcs); do
                     local function add_src(src, xrules)
-                        local ext = path.extension(src); if ext == '.obj' then
+                        local ext = path.extension(src); if ext == '.obj' or ext == '.o' then
                             table.insert(objs, src); return
                         end
 
@@ -832,11 +803,35 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                     C.ninja_edge_add(t.fx(topts, f), tool_rulename, f, nil)
                                 end)
                             else
+                                local xdefines_options = options_map(xopts.defines, function(k, v)
+                                    return self:make_flag('define', option_from_kv(k, v))
+                                end)
+
+                                local xinclude_dirs_options = options_map(xopts.include_dirs, function(k, v)
+                                    return self:make_flag('include_dir', option_from_kv(k, v))
+                                end)
+
+                                local xinclude_options = options_map(xopts.include, function(k, v)
+                                    return self:make_flag('include', option_from_kv(k, v))
+                                end)
+
+                                local xcx_options = options_merge(options_map(xopts.cx_flags, function(k, v)
+                                    return self:make_flag(k, v)
+                                end), xdefines_options, xinclude_dirs_options, xinclude_options)
+
+                                local xc_options = options_merge(options_map(xopts.c_flags, function(k, v)
+                                    return self:make_flag(k, v)
+                                end), xcx_options, xdefines_options, xinclude_dirs_options, xinclude_options)
+
+                                local xcxx_options = options_merge(options_map(xopts.cxx_flags, function(k, v)
+                                    return self:make_flag(k, v)
+                                end), xcx_options, xdefines_options, xinclude_dirs_options, xinclude_options)
+
                                 if file_is_typeof(src, c_file_extensions) then
                                     local cc_rule_name = symgen(self.name .. '_cc_'); do
                                         C.ninja_rule_add(cc_rule_name, {
                                             command = options_tostring(ccache(), self.cc,
-                                                options_merge({}, c_options, options_pick(xopts, unpack(c_option_fields)))),
+                                                options_merge({}, xc_options, xcx_options)),
                                             depfile = '$out.d',
                                             deps = dep_type,
                                             description = 'CC $out',
@@ -851,8 +846,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                     local cxx_rule_name = symgen(self.name .. '_cxx_'); do
                                         C.ninja_rule_add(cxx_rule_name, {
                                             command = options_tostring(ccache(), self.cxx,
-                                                options_merge({}, cxx_options,
-                                                    options_pick(xopts, unpack(cxx_option_fields)))),
+                                                options_merge({}, cxx_options, xcx_options)),
                                             depfile = '$out.d',
                                             deps = dep_type,
                                             description = 'CXX $out',
