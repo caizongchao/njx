@@ -1,4 +1,7 @@
 ---@diagnostic disable: deprecated, undefined-field
+
+local as_list = _G['as_list']
+
 ffi.cdef [[
     enum {
         NINJA__QUIET,  // No output -- used when testing.
@@ -48,7 +51,10 @@ local TARGET_EXTENSION = {}; do
     else
         fatal('unsupported platform: %s', HOST_OS)
     end
+    TARGET_EXTENSION['phony'] = ''
 end
+
+local TARGET_DEFAULT_TYPE = 'phony'
 
 local ninja = {}; _G.ninja = ninja
 
@@ -73,17 +79,23 @@ local function ensure_field(t, field, default)
     end; return x
 end
 
-local function as_list(x)
-    if type(x) == 'table' then return x else return { x } end
-end
-
-local function as_xlist(x)
-    if xtype(x) == 'table' then return x else return { x } end
-end
-
 local function public(t)
     return table.tag(t, 'public')
 end; _G.public = public
+
+local function files_in(t)
+    local r, c = {}, #t; if c > 1 then
+        local dir = t[1]; for i = 2, c do
+            table.insert(r, path.combine(dir, t[i]))
+        end
+    end
+    for k, v in pairs(t) do
+        if type(k) ~= 'number' then
+            r[k] = v
+        end
+    end
+    return r
+end; _G.files_in = files_in
 
 local function options_foreach(t, fx)
     for k, x in pairs(as_list(t)) do
@@ -156,7 +168,9 @@ end
 local function options_tobuf(buf, t)
     options_foreach(t, function(k, x)
         if k == nil then
-            buf:put(x, ' ')
+            buf:put(x, x == '' and '' or ' ')
+        elseif x == nil then
+            buf:put(k, k == '' and '' or ' ')
         else
             buf:put(k, '=', x, ' ')
         end
@@ -170,7 +184,7 @@ local function options_tostring(...)
         options_tobuf(buf, x)
     end, ...)
     return buf:tostring()
-end
+end; _G.options_tostring = options_tostring
 
 local function options_pick(t, ...)
     local r, c = {}, select('#', ...)
@@ -409,6 +423,7 @@ end
 
 local c_file_extensions = { '.c' }
 local cxx_file_extensions = { '.cpp', '.cxx', '.cc' }
+local asm_file_extensions = { '.s', '.S', '.asm' }
 
 local c_option_fields = { 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
 local cxx_option_fields = { 'cxx_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
@@ -430,7 +445,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
     target = {
         new = function(name, opts)
             local target = extends(object(xtype({
-                name = name, opts = table.merge({ type = 'binary' }, opts)
+                name = name, opts = table.merge({ type = TARGET_DEFAULT_TYPE }, opts)
             }, 'target')), basic_toolchain.target.basic, basic_cc_toolchain.target.basic)
 
             if name ~= nil then
@@ -473,35 +488,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 self.opts.type = type; if type == 'shared' then
                     self:ld_flags(self:make_flag('shared'))
                 end
-                return self
-            end,
-
-            std = function(self, ...)
-                vargs_foreach(function(x)
-                    local cstd, cxxstd
-
-                    if type(x) == 'string' then
-                        if x:starts_with('c++') then
-                            cxxstd = x
-                        else
-                            cstd = x
-                        end
-                    else
-                        if x.c then
-                            cstd = x.c
-                        elseif x.cxx then
-                            cxxstd = x.cxx
-                        end
-                    end
-
-                    if cstd then
-                        self:c_flags(self:make_flag('std', cstd))
-                    end
-
-                    if cxxstd then
-                        self:cxx_flags(self:make_flag('std', cxxstd))
-                    end
-                end, ...)
                 return self
             end,
 
@@ -585,6 +571,14 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 return self
             end,
 
+            as_flags = function(self, ...)
+                local xs = ensure_field(self.opts, 'as_flags', {})
+                vargs_foreach(function(flags)
+                    table.insert(xs, flags)
+                end, ...)
+                return self
+            end,
+
             ld_flags = function(self, ...)
                 local xs = ensure_field(self.opts, 'ld_flags', {})
                 vargs_foreach(function(flags)
@@ -622,16 +616,22 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local s; local opts = self.opts
 
+                if not self.name then self.name = symgen('dummy_target_') end
+                if not opts.type then opts.type = TARGET_DEFAULT_TYPE end
+
                 local build_dir = path.combine(ninja.build_dir(), self.name); do
                     self.build_dir = build_dir
                 end
 
-                local output = path.combine(ninja.build_dir(), self.name .. TARGET_EXTENSION[opts.type]); do
-                    self.output = output
+                local output; if opts.type == 'phony' then
+                    output = symgen(self.name .. '_phony_')
+                else
+                    output = path.combine(ninja.build_dir(), self.name .. TARGET_EXTENSION[opts.type])
                 end
+                self.output = output
 
                 local defines, include_dirs, include, lib_dirs, libs = {}, {}, {}, {}, {}
-                local c_flags, cx_flags, cxx_flags, ld_flags, ar_flags = {}, {}, {}, {}, {}
+                local c_flags, cx_flags, cxx_flags, as_flags, ld_flags, ar_flags = {}, {}, {}, {}, {}, {}
 
                 ninja.deps_foreach(self, function(dep)
                     local mergefx = (dep == self) and options_merge or options_public_merge
@@ -644,6 +644,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     mergefx(c_flags, dep.opts.c_flags)
                     mergefx(cx_flags, dep.opts.cx_flags)
                     mergefx(cxx_flags, dep.opts.cxx_flags)
+                    mergefx(as_flags, dep.opts.as_flags)
                     mergefx(ld_flags, dep.opts.ld_flags)
                     mergefx(ar_flags, dep.opts.ar_flags)
                 end)
@@ -668,21 +669,26 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     return self:make_flag('lib', option_from_kv(k, v))
                 end)
 
-                local cx_options = options_merge(options_map(cx_flags, function(k, v)
+                local cx_options = options_merge({}, options_map(cx_flags, function(k, v)
                     return self:make_flag(k, v)
                 end), defines_options, include_dirs_options, include_options)
 
-                local c_options = options_merge(cx_options, options_map(c_flags, function(k, v)
+                local c_options = options_merge({}, cx_options, options_map(c_flags, function(k, v)
                     return self:make_flag(k, v)
                 end))
                 self.c_options = c_options
 
-                local cxx_options = options_merge(cx_options, options_map(cxx_flags, function(k, v)
+                local cxx_options = options_merge({}, cx_options, options_map(cxx_flags, function(k, v)
                     return self:make_flag(k, v)
                 end))
                 self.cxx_options = cxx_options
 
-                local ld_options = options_merge(options_map(ld_flags, function(k, v)
+                local as_options = options_map(as_flags, function(k, v)
+                    return self:make_flag(k, v)
+                end)
+                self.as_options = as_options
+
+                local ld_options = options_merge({}, options_map(ld_flags, function(k, v)
                     return self:make_flag(k, v)
                 end), lib_dirs_options, libs_options)
                 self.ld_options = ld_options
@@ -702,7 +708,12 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                 description = 'BUILD $out',
                             })
                         end
-                        rules[ext] = tool_rulename
+
+                        if tool.opts.output then
+                            rules[ext] = { tool_rulename, tool }
+                        else
+                            rules[ext] = tool_rulename
+                        end
                     end
                 end
 
@@ -733,6 +744,16 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     rules[ext] = cxx_rule_name
                 end)
 
+                local as_rule_name = symgen(self.name .. '_as_'); do
+                    C.ninja_rule_add(as_rule_name, {
+                        command = options_tostring(self.as, as_options),
+                        description = 'AS $out',
+                    })
+                end
+                table.iforeach(asm_file_extensions, function(ext)
+                    rules[ext] = as_rule_name
+                end)
+
                 local ld_rule_name = symgen(self.name .. '_ld_'); do
                     C.ninja_rule_add(ld_rule_name, {
                         command = options_tostring(self.ld, ld_options, self.default_libs),
@@ -754,12 +775,16 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                         end
 
                         local rule = xrules[ext]; if rule == nil then
-                            fatal('no rule for file: %s', src)
+                            fatal('no rule for file: %s', src); return
+                        end
+                        local obj; if type(rule) == 'string' then
+                            obj = path.combine(build_dir, src .. '.o')
+                        else
+                            local tool = rule[2]; rule = rule[1]
+                            obj = tool.fx(tool.opts, src)
                         end
 
-                        local obj = path.combine(build_dir, src .. '.o'); do
-                            table.insert(objs, obj)
-                        end
+                        table.insert(objs, obj)
 
                         C.ninja_edge_add(obj, rule, src, nil)
                     end
@@ -799,7 +824,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                     end
                                 end
 
-                                local topts = extends({}, xopts, t.opts)
+                                local topts = extends({}, t.opts, xopts, opts)
 
                                 local tool_rulename = symgen(self.name .. '_tool_' .. n); do
                                     C.ninja_rule_add(tool_rulename, {
@@ -809,38 +834,22 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                 end
 
                                 source_foreach(src, function(f)
-                                    C.ninja_edge_add(t.fx(topts, f), tool_rulename, f, nil)
+                                    local obj = t.fx(topts, f)
+
+                                    table.insert(objs, obj)
+                                    C.ninja_edge_add(obj, tool_rulename, f, nil)
                                 end)
                             else
-                                local xdefines_options = options_map(xopts.defines, function(k, v)
-                                    return self:make_flag('define', option_from_kv(k, v))
-                                end)
+                                xtarget:configure()
 
-                                local xinclude_dirs_options = options_map(xopts.include_dirs, function(k, v)
-                                    return self:make_flag('include_dir', option_from_kv(k, v))
-                                end)
-
-                                local xinclude_options = options_map(xopts.include, function(k, v)
-                                    return self:make_flag('include', option_from_kv(k, v))
-                                end)
-
-                                local xcx_options = options_merge(options_map(xopts.cx_flags, function(k, v)
-                                    return self:make_flag(k, v)
-                                end), xdefines_options, xinclude_dirs_options, xinclude_options)
-
-                                local xc_options = options_merge(options_map(xopts.c_flags, function(k, v)
-                                    return self:make_flag(k, v)
-                                end), xcx_options, xdefines_options, xinclude_dirs_options, xinclude_options)
-
-                                local xcxx_options = options_merge(options_map(xopts.cxx_flags, function(k, v)
-                                    return self:make_flag(k, v)
-                                end), xcx_options, xdefines_options, xinclude_dirs_options, xinclude_options)
+                                local xc_options, xcxx_options, xas_options = xtarget.c_options, xtarget.cxx_options,
+                                    xtarget.as_options
 
                                 if file_is_typeof(src, c_file_extensions) then
                                     local cc_rule_name = symgen(self.name .. '_cc_'); do
                                         C.ninja_rule_add(cc_rule_name, {
                                             command = options_tostring(ccache(), self.cc,
-                                                options_merge({}, xc_options, xcx_options)),
+                                                options_merge({}, c_options, xc_options)),
                                             depfile = '$out.d',
                                             deps = dep_type,
                                             description = 'CC $out',
@@ -855,7 +864,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                     local cxx_rule_name = symgen(self.name .. '_cxx_'); do
                                         C.ninja_rule_add(cxx_rule_name, {
                                             command = options_tostring(ccache(), self.cxx,
-                                                options_merge({}, cxx_options, xcx_options)),
+                                                options_merge({}, cxx_options, xcxx_options)),
                                             depfile = '$out.d',
                                             deps = dep_type,
                                             description = 'CXX $out',
@@ -863,6 +872,19 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                     end
                                     table.iforeach(cxx_file_extensions, function(ext)
                                         xrules[ext] = cxx_rule_name
+                                    end)
+                                end
+
+                                if file_is_typeof(src, asm_file_extensions) then
+                                    local as_rule_name = symgen(self.name .. '_as_'); do
+                                        C.ninja_rule_add(as_rule_name, {
+                                            command = options_tostring(self.as,
+                                                options_merge({}, as_options, xas_options)),
+                                            description = 'AS $out',
+                                        })
+                                    end
+                                    table.iforeach(asm_file_extensions, function(ext)
+                                        xrules[ext] = as_rule_name
                                     end)
                                 end
 
@@ -878,16 +900,29 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     end
                 end; self.objs = objs
 
-                if not table.isempty(objs) then
-                    local deplibs = {}; table.iforeach(opts.deps, function(tdep)
-                        local topts = tdep.opts
-                        if (topts.type == 'shared') or (topts.type == 'static') then
-                            table.insert(deplibs, tdep.output)
+                if opts.type == 'phony' then
+                    if table.isempty(objs) then
+                        self.output = nil
+                    else
+                        C.ninja_edge_add(output, 'phony', objs, nil)
+                    end
+                elseif not table.isempty(objs) then
+                    local deplibs, implicits = {}, {}; table.iforeach(opts.deps, function(tdep)
+                        if tdep.output ~= nil then
+                            local topts = tdep.opts; if (topts.type == 'shared') or (topts.type == 'static') then
+                                table.insert(deplibs, tdep.output)
+                            elseif topts.type == 'phony' then
+                                table.insert(implicits, tdep.output)
+                            end
                         end
                     end)
 
+                    local inputs = options_merge({}, objs, deplibs); if not table.isempty(implicits) then
+                        inputs.implicit = implicits
+                    end
+
                     C.ninja_edge_add(output, pick(opts.type == 'static', ar_rule_name, ld_rule_name),
-                        options_merge({}, objs, deplibs), nil)
+                        inputs, nil)
 
                     if opts.default ~= false then
                         C.ninja_default_add(output)
@@ -930,8 +965,6 @@ local gcc_toolchain; gcc_toolchain = object({
         new = function(...)
             local t = extends(basic_cc_toolchain.target.new(...), gcc_toolchain.target.basic); do
                 t:cx_flags('-MMD -MF $out.d -o $out -c $in')
-                t:ld_flags('$in -o $out')
-                t:ar_flags('rcs $out $in')
             end
             return t
         end,
@@ -939,8 +972,9 @@ local gcc_toolchain; gcc_toolchain = object({
         basic = {
             cc = 'gcc',
             cxx = 'g++',
-            ar = 'ar',
-            ld = 'g++',
+            as = 'as -o $out $in',
+            ar = 'ar rcs $out $in',
+            ld = 'g++ $in -o $out',
 
             dep_type = 'gcc',
 
@@ -970,8 +1004,8 @@ local cosmocc_toolchain; cosmocc_toolchain = object({
         basic = {
             cc = 'cosmocc',
             cxx = 'cosmoc++',
-            ar = 'cosmoar',
-            ld = 'cosmoc++',
+            ar = 'cosmoar rcs $out $in',
+            ld = 'cosmoc++ $in -o $out',
         },
     },
 }); ninja.toolchains.cosmocc = cosmocc_toolchain
@@ -985,8 +1019,8 @@ local clang_toolchain; clang_toolchain = object({
         basic = {
             cc = 'clang',
             cxx = 'clang++',
-            ar = 'llvm-ar',
-            ld = 'clang++',
+            ar = 'llvm-ar rcs $out $in',
+            ld = 'clang++ $in -o $out',
 
             flag_map = extends({}, gcc_toolchain.target.basic.flag_map, {
                 debug_cc = '-g -gcodeview',
@@ -999,8 +1033,8 @@ local msvc_toolchain; msvc_toolchain = object({
     target = {
         new = function(...)
             local t = extends(basic_cc_toolchain.target.new(...), msvc_toolchain.target.basic); do
-                -- t:cx_flags('/nologo /showIncludes /c /Fo$out /Fd$out.pdb $in')
                 t:cx_flags('/nologo /showIncludes /c /Fo$out $in')
+                t:as_flags('/nologo /c /Fo$out $in')
                 t:ld_flags('/nologo $in /OUT:$out')
                 t:ar_flags('/nologo /OUT:$out $in')
             end
@@ -1010,6 +1044,7 @@ local msvc_toolchain; msvc_toolchain = object({
         basic = {
             cc = 'cl',
             cxx = 'cl',
+            as = 'ml64',
             ar = 'lib',
             ld = 'link',
 
@@ -1105,10 +1140,11 @@ function ninja.targets_foreach(targets, fx)
 end
 
 function ninja.deps_foreach(target, fx)
-    local ctx = {}; fx(target)
+    local ctx = {}
     target_walk(target, function(t)
         if t ~= target then fx(t) end
     end, ctx)
+    fx(target)
 end
 
 function ninja.build(...)

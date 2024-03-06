@@ -6,6 +6,8 @@ local ffi = require('ffi'); local C = ffi.C
 
 _G.ffi = ffi; _G.C = C
 
+-- jit.off()
+
 ffi.cdef [[
     void debug(gcptr x);
 
@@ -43,6 +45,14 @@ local function xtype(a, x)
         table.tag(a, x); return a
     end
 end; _G.xtype = xtype
+
+local function as_list(x)
+    if type(x) == 'table' then return x else return { x } end
+end; _G.as_list = as_list
+
+local function as_xlist(x)
+    if xtype(x) == 'table' then return x else return { x } end
+end; _G.as_xlist = as_xlist
 
 local function vargs_foreach(fx, ...)
     local c = select('#', ...); if c == 0 then
