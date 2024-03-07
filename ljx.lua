@@ -150,11 +150,19 @@ local function object(x)
 end; _G.object = object
 
 local function extends(x, ...)
-    local xx, mx = object(x); vargs_foreach(function(base)
-        table.insert(mx, 1, base)
+    local xx, mx = object(x)
+    local i = 1; vargs_foreach(function(base)
+        table.insert(mx, i, base); i = i + 1
     end, ...)
     return xx
 end; _G.extends = extends
+
+-- local function extends(x, ...)
+--     local xx, mx = object(x); vargs_foreach(function(base)
+--         table.insert(mx, 1, base)
+--     end, ...)
+--     return xx
+-- end; _G.extends = extends
 
 local function stacktrace(...)
     local msg; if select('#', ...) > 0 then
@@ -561,6 +569,9 @@ local function path_dfname(path)
 end
 
 local function path_extension(xpath)
+    if xpath.find == nil then
+        print(inspect(xpath)); stacktrace(); os.exit();
+    end
     local i = xpath:find('[^%.]%.[%w]+$')
     if i then
         return xpath:sub(i + 1)

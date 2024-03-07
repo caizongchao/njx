@@ -408,7 +408,11 @@ struct lua_state {
     }
 
     lua_state & run(std::string_view const & code) {
-        luaL_loadbuffer(L, code.data(), code.size(), "=(lua_state::run)"); lua_call(L, 0, 0); return *this;
+        if(luaL_loadbuffer(L, code.data(), code.size(), "=(lua_state::run)") != 0) {
+            fatal("lua_state::run: %s", lua_tostring(L, -1)); return *this;
+        }
+        
+        lua_call(L, 0, 0); return *this;
     }
 };
 

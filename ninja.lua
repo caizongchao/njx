@@ -83,6 +83,10 @@ local function public(t)
     return table.tag(t, 'public')
 end; _G.public = public
 
+local function implicit(t)
+    return table.tag(t, 'implicit')
+end; _G.implicit = implicit
+
 local function files_in(t)
     local r, c = {}, #t; if c > 1 then
         local dir = t[1]; for i = 2, c do
@@ -429,6 +433,30 @@ local c_option_fields = { 'c_flags', 'cx_flags', 'defines', 'includes', 'include
 local cxx_option_fields = { 'cxx_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
 local ld_option_fields = { 'ld_flags', 'libs', 'lib_dirs' }
 
+local function table_is_option(t)
+    for k, _ in pairs(t) do
+        if type(k) ~= 'number' then
+            return true
+        end
+    end
+end
+
+local function table_as_option(t)
+    return table_is_option(t) and t or {}
+end
+
+-- local function source_foreach(srcs, fx)
+--     srcs = as_list(srcs); local opts = table_as_option(srcs); for _, x in ipairs(srcs) do
+--         if path.is_wildcard(x) then
+--             fs.foreach(x, function(f)
+--                 fx(f, opts)
+--             end)
+--         else
+--             fx(x, opts)
+--         end
+--     end
+-- end
+
 local function source_foreach(srcs, fx)
     for _, x in ipairs(as_list(srcs)) do
         if path.is_wildcard(x) then
@@ -446,7 +474,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
         new = function(name, opts)
             local target = extends(object(xtype({
                 name = name, opts = table.merge({ type = TARGET_DEFAULT_TYPE }, opts)
-            }, 'target')), basic_toolchain.target.basic, basic_cc_toolchain.target.basic)
+            }, 'target')), basic_cc_toolchain.target.basic, basic_toolchain.target.basic)
 
             if name ~= nil then
                 ninja.targets[name] = target
@@ -704,7 +732,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     for ext, tool in pairs(opts.tools) do
                         local tool_rulename = symgen(self.name .. '_tool_' .. ext); do
                             C.ninja_rule_add(tool_rulename, {
-                                command = tool.fx(tool.opts),
+                                command = tool.fx(extends({}, tool.opts, opts)),
                                 description = 'BUILD $out',
                             })
                         end
@@ -769,7 +797,9 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 end
 
                 local objs = {}; local srcs = as_list(opts.srcs); do
-                    local function add_src(src, xrules)
+                    local function add_src(src, xrules, opts)
+                        opts = opts or {};
+
                         local ext = path.extension(src); if ext == '.obj' or ext == '.o' then
                             table.insert(objs, src); return
                         end
@@ -781,7 +811,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                             obj = path.combine(build_dir, src .. '.o')
                         else
                             local tool = rule[2]; rule = rule[1]
-                            obj = tool.fx(tool.opts, src)
+                            obj = tool.fx(extends({}, opts, tool.opts), src)
                         end
 
                         table.insert(objs, obj)
@@ -791,6 +821,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                     for _, src in ipairs(srcs) do
                         if type(src) == 'table' then
+                            local src_opts = table_as_option(src)
+
                             local xtarget = self:new(); for k, v in pairs(src) do
                                 if type(k) == 'number' then
                                     goto continue
@@ -824,7 +856,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                     end
                                 end
 
-                                local topts = extends({}, t.opts, xopts, opts)
+                                local topts = extends({}, src_opts, t.opts, xopts, opts)
 
                                 local tool_rulename = symgen(self.name .. '_tool_' .. n); do
                                     C.ninja_rule_add(tool_rulename, {
@@ -888,8 +920,27 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                     end)
                                 end
 
+                                if opts.tools then
+                                    for ext, tool in pairs(opts.tools) do
+                                        local topts = extends({}, src_opts, tool.opts, opts)
+
+                                        local tool_rulename = symgen(self.name .. '_tool_' .. ext); do
+                                            C.ninja_rule_add(tool_rulename, {
+                                                command = tool.fx(topts),
+                                                description = 'BUILD $out',
+                                            })
+                                        end
+                
+                                        if topts.output then
+                                            rules[ext] = { tool_rulename, tool }
+                                        else
+                                            rules[ext] = tool_rulename
+                                        end
+                                    end
+                                end
+                
                                 source_foreach(src, function(f)
-                                    add_src(f, xrules)
+                                    add_src(f, xrules, src_opts)
                                 end)
                             end
                         else
@@ -907,15 +958,17 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                         C.ninja_edge_add(output, 'phony', objs, nil)
                     end
                 elseif not table.isempty(objs) then
-                    local deplibs, implicits = {}, {}; table.iforeach(opts.deps, function(tdep)
-                        if tdep.output ~= nil then
-                            local topts = tdep.opts; if (topts.type == 'shared') or (topts.type == 'static') then
-                                table.insert(deplibs, tdep.output)
-                            elseif topts.type == 'phony' then
-                                table.insert(implicits, tdep.output)
+                    local deplibs, implicits = {}, {}; if opts.type == 'shared' or opts.type == 'binary' then
+                        table.iforeach(opts.deps, function(tdep)
+                            if tdep.output ~= nil then
+                                local topts = tdep.opts; if (topts.type == 'shared') or (topts.type == 'static') then
+                                    table.insert(deplibs, tdep.output)
+                                elseif topts.type == 'phony' then
+                                    table.insert(implicits, tdep.output)
+                                end
                             end
-                        end
-                    end)
+                        end)
+                    end
 
                     local inputs = options_merge({}, objs, deplibs); if not table.isempty(implicits) then
                         inputs.implicit = implicits
