@@ -930,7 +930,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                                 description = 'BUILD $out',
                                             })
                                         end
-                
+
                                         if topts.output then
                                             rules[ext] = { tool_rulename, tool }
                                         else
@@ -938,7 +938,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                         end
                                     end
                                 end
-                
+
                                 source_foreach(src, function(f)
                                     add_src(f, xrules, src_opts)
                                 end)
@@ -959,8 +959,9 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     end
                 elseif not table.isempty(objs) then
                     local deplibs, implicits = {}, {}; if opts.type == 'shared' or opts.type == 'binary' then
-                        table.iforeach(opts.deps, function(tdep)
-                            if tdep.output ~= nil then
+                        -- table.iforeach(opts.deps, function(tdep)
+                        ninja.deps_foreach(self, function(tdep)
+                            if tdep ~= self and tdep.output ~= nil then
                                 local topts = tdep.opts; if (topts.type == 'shared') or (topts.type == 'static') then
                                     table.insert(deplibs, tdep.output)
                                 elseif topts.type == 'phony' then
@@ -1174,6 +1175,8 @@ local function target_walk(target, fx, ctx)
 end
 
 function ninja.targets_foreach(targets, fx)
+    if not targets then return end
+
     local t = xtype(targets); if t == 'function' then
         fx = targets; targets = ninja.targets;
     elseif t == 'string' then
@@ -1183,12 +1186,10 @@ function ninja.targets_foreach(targets, fx)
         targets = { a }
     elseif t == 'target' then
         targets = { targets }
-    else
-        fatal('invalid targets: %s', targets)
     end
 
-    table.iforeach(targets, function(target)
-        target_walk(target, fx, {})
+    local ctx = {}; table.foreach(targets, function(_, target)
+        target_walk(target, fx, ctx)
     end)
 end
 
@@ -1200,7 +1201,21 @@ function ninja.deps_foreach(target, fx)
     fx(target)
 end
 
+function ninja.defaults_foreach(fx)
+    ninja.targets_foreach(ninja.targets, function(target)
+        if target.opts.default ~= false then
+            fx(target)
+        end
+    end)
+end
+
 function ninja.build(...)
+    if select('#', ...) == 0 then
+        ninja.defaults_foreach(function(target)
+            target:build()
+        end); return
+    end
+
     vargs_foreach(function(target)
         vargs_foreach(function(t)
             ninja.targets_foreach(t, function(x)
@@ -1239,12 +1254,13 @@ function ninja.watch(dir, wildcard, ...)
         end
     end, ...)
 
-    local is_building = false; fs.watch(dir, function(x)
-        local xmatch; x = path.fname(x)
-
-        for _, w in ipairs(as_list(wildcard)) do
-            if path.ifnmatch(w, x) then
-                xmatch = true; break
+    local is_building = false; fs.watch(dir, function(fpath)
+        local xmatch; do
+            local fname = path.fname(fpath)
+            for _, w in ipairs(as_list(wildcard)) do
+                if path.ifnmatch(w, fname) then
+                    xmatch = true; break
+                end
             end
         end
 
@@ -1256,14 +1272,16 @@ function ninja.watch(dir, wildcard, ...)
                     local now = _G.clock()
 
                     if type(targets) == 'function' then
-                        targets()
+                        targets(fpath)
                     else
                         ninja.build(unpack(targets))
                     end
 
-                    print(string.format('build time: %.3fs', (_G.clock() - now) / 1000))
+                    -- print(string.format('time: %.3fs', (_G.clock() - now) / 1000))
 
-                    is_building = false; print('watching...')
+                    is_building = false;
+
+                    -- print('watching...')
                 end)
                 return 'break'
             end

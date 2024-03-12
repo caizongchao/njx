@@ -79,6 +79,50 @@ int main(int argc, char ** argv) {
                     lua_pushinteger(L, status);
 
                     return 1;
+                })
+            .def(
+                "cexec", (lua_CFunction)[](lua_State * L)->int {
+                    int argc = lua_gettop(L); {
+                        if(argc < 1) {
+                            fatal("exec: expected at least 1 argument, got %d", argc); return 0;
+                        }
+                    }
+
+                    auto argv = (const char **)alloca((argc + 1) * sizeof(char *)); {
+                        for(int i = 0; i < argc; i++) {
+                            argv[i] = (char *)luaL_checkstring(L, i + 1);
+                        }
+
+                        argv[argc] = nullptr;
+                    }
+
+                    pid_t pid {-1};
+
+                    posix_spawn_file_actions_t actions; {
+                        ok = posix_spawn_file_actions_init(&actions);
+                        // ok = posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0);
+                        // ok = posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0);
+                    }
+
+                    posix_spawnattr_t attrs; {
+                        ok = posix_spawnattr_init(&attrs);
+                        // ok = posix_spawnattr_setflags(&attrs, POSIX_SPAWN_SETSIGMASK);
+                        // ok = posix_spawnattr_setsigmask(&attrs, nullptr);
+                    }
+
+                    int r = posix_spawnp(&pid, argv[0], &actions, &attrs, (char * const *)argv, nullptr); {
+                        if(r != 0) {
+                            fatal("failed to spawn '%s': %s", argv[0], strerror(r)); return 0;
+                        }
+                    }
+
+                    int status;
+
+                    waitpid(pid, &status, 0);
+
+                    lua_pushinteger(L, status);
+
+                    return 1;
                 });
 
         lua_table($L["table"])
