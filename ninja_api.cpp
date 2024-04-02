@@ -20,6 +20,10 @@
 
 namespace fs = std::filesystem;
 
+fs::path $build_script;
+
+bool $reload_build_script = false;
+
 struct reftable {
     static constexpr uint32_t NOFREE_REF = (uint32_t)-1;
 
@@ -635,6 +639,10 @@ const char * host_os() {
     if(IsWindows()) return "Windows"; else return "Linux";
 }
 
+const char * build_script() { return $build_script.c_str(); }
+
+bool is_build_script(const char * xpath) { return fs::equivalent(xpath, $build_script); }
+
 void buffer_pathappend(lua_gcptr buf, lua_gcptr path) {
     SBuf * sbuf = buf; lua_string s = path;
 
@@ -651,6 +659,8 @@ lua_gcptr buffer_tostring(lua_gcptr buf) {
     auto sbuf = (SBuf *)buf; return {lua_string(sbuf->b, sbuflen(sbuf))};
 }
 
+void reload() { $reload_build_script = true; }
+
 struct clib_sym_t {
     const char * name; void * sym;
 };
@@ -661,6 +671,9 @@ static clib_sym_t __clib_syms[] = {
     CLIB_SYM(debug),
     CLIB_SYM(printf),
     CLIB_SYM(host_os),
+    CLIB_SYM(reload),
+    CLIB_SYM(build_script),
+    CLIB_SYM(is_build_script),
     CLIB_SYM(buffer_pathappend),
     CLIB_SYM(buffer_tostring),
     CLIB_SYM(reftable_new),

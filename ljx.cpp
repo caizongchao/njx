@@ -4,8 +4,10 @@
 #include "spawn.h"
 #include "fnmatch.h"
 
-#include <filesystem>
 #include <chrono>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 void ninja_initialize();
 void ninja_finalize();
@@ -19,6 +21,11 @@ struct ninja_initializer {
         ninja_finalize();
     }
 };
+
+extern fs::path $build_script;
+extern bool $reload_build_script;
+
+extern "C" char * GetProgramExecutableName(void);
 
 int main(int argc, char ** argv) {
     { static ninja_initializer _; }
@@ -289,11 +296,27 @@ int main(int argc, char ** argv) {
             });
     }).open();
 
-    const char * script = (argc > 1) ? argv[1] : "build.lua";
+    $build_script = (argc > 1) ? argv[1] : "build.lua"; if(!$build_script.is_absolute()) {
+        $build_script = fs::current_path() / $build_script;
+    }
 
-    file_exists(script) || fatal("%s not found\n", script);
+    fs::exists($build_script) || fatal("%s not found\n", $build_script.c_str());
 
-    $L.run(afile(script).read());
+    $L.run(afile($build_script.c_str()).read());
+
+    if($reload_build_script) {
+        char ** xargv = (char **)alloca((argc + 1) * sizeof(char *)); {
+            for(int i = 0; i < argc; i++) {
+                xargv[i] = argv[i];
+            }
+
+            xargv[argc] = nullptr;
+        }
+
+        execvp(GetProgramExecutableName(), xargv);
+
+        printf("failed to reload build script: %d\n", errno);
+    }
 
     return 0;
 }

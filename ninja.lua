@@ -20,6 +20,9 @@ ffi.cdef [[
     } ninja_config_t;
 
     const char * host_os();
+    void reload();
+    const char * build_script();
+    bool is_build_script(const char * x);
 
     ninja_config_t * ninja_config_get();
     void ninja_config_apply();
@@ -1244,6 +1247,10 @@ function ninja.exit_on_error(b)
 end
 
 function ninja.watch(dir, wildcard, ...)
+    ninja.exit_on_error(false)
+
+    local build_script = C.build_script()
+
     local targets = {}; vargs_foreach(function(target)
         if type(target) == 'function' then
             targets = target
@@ -1255,6 +1262,10 @@ function ninja.watch(dir, wildcard, ...)
     end, ...)
 
     local is_building = false; fs.watch(dir, function(fpath)
+        if C.is_build_script(fpath) then
+            C.reload(); quit(); return 'break'
+        end
+
         local xmatch; do
             local fname = path.fname(fpath)
             for _, w in ipairs(as_list(wildcard)) do

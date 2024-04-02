@@ -438,6 +438,8 @@ ffi.cdef [[
     int CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPVOID lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, int hTemplateFile);
     BOOL CloseHandle(int hObject);
 
+    DWORD GetCurrentDirectoryW(DWORD nBufferLength, LPWSTR lpBuffer);
+
     int FindFirstFileW(const WCHAR* lpFileName, WIN32_FIND_DATAW* lpFindFileData);
     int FindNextFileW(int hFindFile, WIN32_FIND_DATAW* lpFindFileData);
     int FindClose(int hFindFile);
@@ -623,12 +625,22 @@ local function path_ftype(path)
     end
 end
 
+local function path_is_absolute(path)
+    return path:find('^[a-zA-Z]:[/\\]') or path:find('^[/\\]')
+end
+
+local function path_getcwd()
+    local cch = C.GetCurrentDirectoryW(STRBUFFER_SIZE, __wstr); return w2u8(__wstr, cch)
+end
+
 do
     local path = {}; do
         path.quote = path_quote
         path.try_quote = path_try_quote
         path.unquote = path_unquote
         path.is_wildcard = path_is_wildcard
+        path.is_absolute = path_is_absolute
+        path.getcwd = path_getcwd
         path.wildcard_to_pattern = path_wildcard_to_pattern
         path.add_backslash_to_drive = path_add_backslash_to_drive
         path.remove_backslash = path_remove_backslash
@@ -885,15 +897,21 @@ local iocp_lpNumberOfBytes = ffi.new("intptr_t[1]")
 local iocp_lpCompletionKey = ffi.new("intptr_t[1]")
 local iocp_lpOverlapped = ffi.new("LPOVERLAPPED[1]")
 
+local iocp_quit = false
+
 local function run()
-    local timeout = 8; while true do
+    local timeout = 8; while not iocp_quit do
         if (GetQueuedCompletionStatus(IOCP, iocp_lpNumberOfBytes, iocp_lpCompletionKey, iocp_lpOverlapped, timeout) ~= 0) then
             iocp_on_complete(iocp_lpCompletionKey[0], iocp_lpOverlapped[0]);
         else
             update_timer()
         end
-    end
+    end; iocp_quit = false
 end; _G.run = run
+
+local function quit()
+    iocp_quit = true
+end; _G.quit = quit
 
 local function post(x)
     local i = iocp_registry:register(x); PostQueuedCompletionStatus(IOCP, 0, i, 0)
