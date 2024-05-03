@@ -380,7 +380,7 @@ local basic_toolchain; basic_toolchain = object({
     target = {
         basic = {
             new = function(self, opts)
-                local t = object()
+                local t = xtype(object(), 'target')
 
                 table.iforeach(self.__mixin, function(v, i)
                     t.__mixin[i] = v
@@ -851,7 +851,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                 end
                                 ::continue::
                             end
-print('xxx', xtype(xtarget)); os.exit();
+
                             local xopts = xtarget.opts
                             local xrules = extends({}, rules)
 
@@ -1223,29 +1223,23 @@ function ninja.target(name, opts)
     return ninja.toolchain_of(opts.toolchain).target.new(name, opts)
 end
 
-local function target_walk(target, fx, ctx)
-    local t = xtype(target); if t == 'string' then
-        target = ninja.targets[target]; if target == nil then
-            fatal('target not found: %s', target)
-        end
-    elseif t ~= 'target' then
-        print(t, xtype(target[1]))
-        if (t ~= 'target') then
-            print('--->', inspect(target))
-        end
-
-        target = target[1];
-
-        if xtype(target) ~= 'target' then
-            fatal('invalid target: %s', target)
-        end
+-- walk through the target dependencies
+local function target_walk(target, fx, ctx, is_private)
+    target = ninja.target_of(target); if target == nil then
+        return
     end
 
     if ctx[target] then return end
 
-    if (t ~= 'private') and target.opts.deps then
+    if (is_private ~= true) and target.opts.deps then
         table.iforeach(target.opts.deps, function(dep)
-            target_walk(dep, fx, ctx)
+            if type(dep) == 'table' then
+                table.iforeach(dep, function(d)
+                    target_walk(d, fx, ctx, xtype(dep) == 'private')
+                end)
+            else
+                target_walk(dep, fx, ctx)
+            end
         end)
     end
 
