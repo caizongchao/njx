@@ -641,7 +641,17 @@ const char * host_os() {
 
 const char * build_script() { return $build_script.c_str(); }
 
-bool is_build_script(const char * xpath) { return fs::equivalent(xpath, $build_script); }
+bool is_build_script(const char * xp) {
+    fs::path xpath = xp; if(!xpath.is_absolute()) {
+        xpath = fs::current_path() / xpath;
+    }
+    
+    xpath = xpath.lexically_normal();
+    
+    return xpath == $build_script;
+    
+    // return fs::equivalent(xpath, $build_script);
+}
 
 void buffer_pathappend(lua_gcptr buf, lua_gcptr path) {
     SBuf * sbuf = buf; lua_string s = path;

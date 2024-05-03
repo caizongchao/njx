@@ -299,6 +299,8 @@ int main(int argc, char ** argv) {
     $build_script = (argc > 1) ? argv[1] : "build.lua"; if(!$build_script.is_absolute()) {
         $build_script = fs::current_path() / $build_script;
     }
+    
+    $build_script = $build_script.lexically_normal();
 
     fs::exists($build_script) || fatal("%s not found\n", $build_script.c_str());
 

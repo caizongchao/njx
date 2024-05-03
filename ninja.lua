@@ -86,6 +86,10 @@ local function public(t)
     return table.tag(t, 'public')
 end; _G.public = public
 
+local function private(t)
+    return table.tag(t, 'private')
+end; _G.private = private
+
 local function implicit(t)
     return table.tag(t, 'implicit')
 end; _G.implicit = implicit
@@ -207,6 +211,10 @@ end
 
 local function option_from_kv(k, v)
     return (k == nil) and v or (k .. '=' .. v)
+end
+
+local function option_isflag(k)
+    return string.starts_with(k, '-') or string.starts_with(k, '/')
 end
 
 local options = {
@@ -429,7 +437,7 @@ local function file_is_typeof(files, extensions)
 end
 
 local c_file_extensions = { '.c' }
-local cxx_file_extensions = { '.cpp', '.cxx', '.cc' }
+local cxx_file_extensions = { '.cpp', '.cxx', '.cc', '.cu' }
 local asm_file_extensions = { '.s', '.S', '.asm' }
 
 local c_option_fields = { 'c_flags', 'cx_flags', 'defines', 'includes', 'include_dirs' }
@@ -492,7 +500,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     k, v = v, k
                 end
 
-                if string.starts_with(k, self.flag_switch) then
+                -- if string.starts_with(k, self.flag_switch) then
+                if option_isflag(k) then
                     return (v == nil) and k or (k .. v)
                 else
                     local x = self.flag_map[k]; if x == nil then
@@ -842,7 +851,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                 end
                                 ::continue::
                             end
-
+print('xxx', xtype(xtarget)); os.exit();
                             local xopts = xtarget.opts
                             local xrules = extends({}, rules)
 
@@ -962,7 +971,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     end
                 elseif not table.isempty(objs) then
                     local deplibs, implicits = {}, {}; if opts.type == 'shared' or opts.type == 'binary' then
-                        -- table.iforeach(opts.deps, function(tdep)
                         ninja.deps_foreach(self, function(tdep)
                             if tdep ~= self and tdep.output ~= nil then
                                 local topts = tdep.opts; if (topts.type == 'shared') or (topts.type == 'static') then
@@ -1086,6 +1094,35 @@ local clang_toolchain; clang_toolchain = object({
     },
 }); ninja.toolchains.clang = clang_toolchain
 
+local zig_toolchain; zig_toolchain = object({
+    target = {
+        new = function(...)
+            return extends(clang_toolchain.target.new(...), zig_toolchain.target.basic)
+        end,
+
+        basic = {
+            cc = 'zig cc',
+            cxx = 'zig c++',
+            ar = 'zig lib $out $in',
+            ld = 'zig cc $in -o $out',
+        },
+    },
+}); ninja.toolchains.zig = zig_toolchain
+
+local nvcc_toolchain; nvcc_toolchain = object({
+    target = {
+        new = function(...)
+            return extends(clang_toolchain.target.new(...), nvcc_toolchain.target.basic)
+        end,
+
+        basic = {
+            cc = 'nvcc',
+            cxx = 'nvcc',
+            ld = 'nvcc $in -o $out',
+        },
+    },
+}); ninja.toolchains.nvcc = nvcc_toolchain
+
 local msvc_toolchain; msvc_toolchain = object({
     target = {
         new = function(...)
@@ -1125,6 +1162,25 @@ local msvc_toolchain; msvc_toolchain = object({
         },
     },
 }); ninja.toolchains.msvc = msvc_toolchain
+
+local clangcl_toolchain; clangcl_toolchain = object({
+    target = {
+        new = function(...)
+            return extends(msvc_toolchain.target.new(...), clangcl_toolchain.target.basic)
+        end,
+
+        basic = {
+            cc = 'clang-cl',
+            cxx = 'clang-cl',
+            ar = 'llvm-lib /OUT:$out $in',
+            ld = 'lld-link $in -out:$out',
+
+            -- flag_map = extends({}, msvc_toolchain.target.basic.flag_map, {
+            --     debug_cc = '/Zi',
+            -- }),
+        },
+    },
+}); ninja.toolchains.clangcl = clangcl_toolchain
 
 if HOST_OS == 'Windows' then
     ninja.toolchain = 'msvc'
@@ -1168,12 +1224,31 @@ function ninja.target(name, opts)
 end
 
 local function target_walk(target, fx, ctx)
+    local t = xtype(target); if t == 'string' then
+        target = ninja.targets[target]; if target == nil then
+            fatal('target not found: %s', target)
+        end
+    elseif t ~= 'target' then
+        print(t, xtype(target[1]))
+        if (t ~= 'target') then
+            print('--->', inspect(target))
+        end
+
+        target = target[1];
+
+        if xtype(target) ~= 'target' then
+            fatal('invalid target: %s', target)
+        end
+    end
+
     if ctx[target] then return end
-    if target.opts.deps then
+
+    if (t ~= 'private') and target.opts.deps then
         table.iforeach(target.opts.deps, function(dep)
             target_walk(dep, fx, ctx)
         end)
     end
+
     fx(target); ctx[target] = true
 end
 
