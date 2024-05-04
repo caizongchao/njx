@@ -18,6 +18,8 @@
 #define _COSMO_SOURCE
 #include <libc/dce.h>
 
+#include <fnmatch.h>
+
 namespace fs = std::filesystem;
 
 fs::path $build_script;
@@ -671,6 +673,10 @@ lua_gcptr buffer_tostring(lua_gcptr buf) {
 
 void reload() { $reload_build_script = true; }
 
+int path_fnmatch(const char * pattern, const char * path) {
+    return fnmatch(pattern, path, 0);
+}
+
 struct clib_sym_t {
     const char * name; void * sym;
 };
@@ -692,6 +698,7 @@ static clib_sym_t __clib_syms[] = {
     CLIB_SYM(timer_add),
     CLIB_SYM(timer_remove),
     CLIB_SYM(timer_update),
+    CLIB_SYM(path_fnmatch),
     CLIB_SYM(ninja_config_get),
     CLIB_SYM(ninja_config_apply),
     CLIB_SYM(ninja_reset),

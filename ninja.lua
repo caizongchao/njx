@@ -456,18 +456,6 @@ local function table_as_option(t)
     return table_is_option(t) and t or {}
 end
 
--- local function source_foreach(srcs, fx)
---     srcs = as_list(srcs); local opts = table_as_option(srcs); for _, x in ipairs(srcs) do
---         if path.is_wildcard(x) then
---             fs.foreach(x, function(f)
---                 fx(f, opts)
---             end)
---         else
---             fx(x, opts)
---         end
---     end
--- end
-
 local function source_foreach(srcs, fx)
     for _, x in ipairs(as_list(srcs)) do
         if path.is_wildcard(x) then
@@ -819,6 +807,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                         local rule = xrules[ext]; if rule == nil then
                             fatal('no rule for file: %s', src); return
                         end
+                        
                         local obj; if type(rule) == 'string' then
                             obj = path.combine(build_dir, src .. '.o')
                         else
@@ -861,7 +850,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                         n = xopts.tool; t = ninja.tool[n]
                                     else
                                         n = symgen(); if x == 'function' then
-                                            t = { fx = x, opts = {} }
+                                            t = { fx = xopts.tool, opts = {} }
                                         else
                                             t = xopts.tool
                                         end
@@ -1224,21 +1213,24 @@ function ninja.target(name, opts)
 end
 
 -- walk through the target dependencies
-local function target_walk(target, fx, ctx, is_private)
+local function target_walk(target, fx, ctx, depth)
     target = ninja.target_of(target); if target == nil then
         return
     end
 
     if ctx[target] then return end
 
-    if (is_private ~= true) and target.opts.deps then
+    if target.opts.deps then
+        depth = depth or 0
         table.iforeach(target.opts.deps, function(dep)
-            if type(dep) == 'table' then
-                table.iforeach(dep, function(d)
-                    target_walk(d, fx, ctx, xtype(dep) == 'private')
-                end)
+            if (type(dep) == 'table') and (xtype(dep) ~= 'target') then
+                if (xtype(dep) ~= 'private') or ((xtype(dep) == 'private') and (depth == 0)) then
+                    table.iforeach(dep, function(d)
+                        target_walk(d, fx, ctx, depth + 1)
+                    end)
+                end
             else
-                target_walk(dep, fx, ctx)
+                target_walk(dep, fx, ctx, depth + 1)
             end
         end)
     end

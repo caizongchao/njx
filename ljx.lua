@@ -23,6 +23,8 @@ ffi.cdef [[
     int timer_add(int ms, int fx, int repeat);
     void timer_remove(int id);
     int timer_update(gcptr xs);
+
+    int path_fnmatch(const char * pattern, const char * path);
 ]]
 
 local printf = C.printf
@@ -515,6 +517,8 @@ local function u82w(str, cch)
     return __wstr
 end
 
+local path_fnmatch = C.path_fnmatch
+
 local function path_quote(path)
     return '"' .. path .. '"'
 end
@@ -658,15 +662,27 @@ end
 
 -- :src(PYSRC_DIR .. 'Modules/_decimal/libmpdec/*.c|bench.c')
 -- :src(PYSRC_DIR .. 'PC/*.c|>invalid_parameter_handler.c|>config.c|*')
+-- local function xmatch(s, pattern)
+--     if string_starts_with(pattern, '>') then
+--         pattern = pattern:sub(2); if s:match(pattern) then
+--             return true
+--         else
+--             return false
+--         end
+--     else
+--         return s:match(pattern)
+--     end
+-- end; _G.xmatch = xmatch
+
 local function xmatch(s, pattern)
     if string_starts_with(pattern, '>') then
-        pattern = pattern:sub(2); if s:match(pattern) then
+        pattern = pattern:sub(2); if path_fnmatch(pattern, s) == 0 then
             return true
         else
             return false
         end
     else
-        return s:match(pattern)
+        return path_fnmatch(pattern, s) == 0
     end
 end; _G.xmatch = xmatch
 
@@ -678,15 +694,7 @@ local function directory_walk(path, opts)
 
         recursive = opts.recursive; wildcard = opts.wildcard
 
-        if opts.exclusions then
-            exclusions = table_map(opts.exclusions, function(exclusion)
-                local pattern; if string_starts_with(exclusion, '>') then
-                    return '>' .. path_wildcard_to_pattern(exclusion:sub(2))
-                else
-                    return path_wildcard_to_pattern(exclusion)
-                end
-            end)
-        end
+        exclusions = opts.exclusions
     else
         fx = opts
     end
@@ -702,12 +710,8 @@ local function directory_walk(path, opts)
                 if filename ~= '.' and filename ~= '..' then
                     if exclusions then
                         for _, exclusion in ipairs(exclusions) do
-                            local x = xmatch(filename, exclusion)
-
-                            if x == filename then
+                            local x = xmatch(filename, exclusion); if x then
                                 goto skip
-                            elseif x == true then
-                                goto continue
                             end
                         end
                     end
