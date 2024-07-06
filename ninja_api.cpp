@@ -392,7 +392,7 @@ void ninja_buildlog_close() {
     }
 }
 
-static bool __exit_on_error = true;
+static bool __exit_on_error = false;
 
 void ninja_exit_on_error(bool b) {
     __exit_on_error = b;
@@ -651,8 +651,6 @@ bool is_build_script(const char * xp) {
     xpath = xpath.lexically_normal();
     
     return xpath == $build_script;
-    
-    // return fs::equivalent(xpath, $build_script);
 }
 
 void buffer_pathappend(lua_gcptr buf, lua_gcptr path) {

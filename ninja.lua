@@ -623,8 +623,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 return self
             end,
 
-            onbuild = function(self, ...)
-                local fxs = ensure_field(self, 'onbuild_actions', {})
+            after_build = function(self, ...)
+                local fxs = ensure_field(self, 'after_build_actions', {})
                 vargs_foreach(function(fx)
                     table.merge(fxs, as_list(fx))
                 end, ...)
@@ -997,8 +997,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 if self.output then
                     if C.ninja_build(self.output) == 0 then
-                        if self.onbuild_actions then
-                            for _, fx in ipairs(self.onbuild_actions) do
+                        if self.after_build_actions then
+                            for _, fx in ipairs(self.after_build_actions) do
                                 fx(self)
                             end
                         end
@@ -1308,10 +1308,6 @@ function ninja.exit_on_error(b)
 end
 
 function ninja.watch(dir, wildcard, ...)
-    ninja.exit_on_error(false)
-
-    local build_script = C.build_script()
-
     local targets = {}; vargs_foreach(function(target)
         if type(target) == 'function' then
             targets = target
@@ -1360,7 +1356,7 @@ function ninja.watch(dir, wildcard, ...)
         end
     end)
 
-    _G.run()
+    ninja.exit_on_error(false); _G.run()
 end
 
 return ninja
