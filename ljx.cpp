@@ -37,6 +37,12 @@ int main(int argc, char ** argv) {
 
         auto _G = $L._G();
 
+        auto arg = lua_table::make(8, 0); for(int i = 1; i < argc; i++) {
+            arg.push(argv[i]);
+        }
+
+        _G.def("arg", arg);
+
         _G
             .def("__registry", $L._R())
             .def(
@@ -296,10 +302,22 @@ int main(int argc, char ** argv) {
             });
     }).open();
 
-    $build_script = (argc > 1) ? argv[1] : "build.lua"; if(!$build_script.is_absolute()) {
-        $build_script = fs::current_path() / $build_script;
+    for(int i = 1; i < argc; ++i) {
+        const char * x = argv[i]; if(*x == '-') continue;
+
+        $build_script = x; break;
     }
     
+    if($build_script.empty()) $build_script = "build.lua";
+
+    if(!$build_script.is_absolute()) {
+        $build_script = fs::current_path() / $build_script;
+    }
+
+    // $build_script = (argc > 1) ? argv[1] : "build.lua"; if(!$build_script.is_absolute()) {
+    //     $build_script = fs::current_path() / $build_script;
+    // }
+
     $build_script = $build_script.lexically_normal();
 
     fs::exists($build_script) || fatal("%s not found\n", $build_script.c_str());
