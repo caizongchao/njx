@@ -660,6 +660,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local defines, include_dirs, include, lib_dirs, libs = {}, {}, {}, {}, {}
                 local c_flags, cx_flags, cxx_flags, as_flags, ld_flags, ar_flags = {}, {}, {}, {}, {}, {}
+                local srcs = {}
 
                 ninja.deps_foreach(self, function(dep)
                     local mergefx = (dep == self) and options_merge or options_public_merge
@@ -675,6 +676,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     mergefx(as_flags, dep.opts.as_flags)
                     mergefx(ld_flags, dep.opts.ld_flags)
                     mergefx(ar_flags, dep.opts.ar_flags)
+                    mergefx(srcs, dep.opts.srcs)
                 end)
 
                 local defines_options = options_map(defines, function(k, v)
@@ -796,7 +798,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     })
                 end
 
-                local objs = {}; local srcs = as_list(opts.srcs); do
+                local objs = {}; do
                     local function add_src(src, xrules, opts)
                         opts = opts or {};
 
@@ -1101,13 +1103,37 @@ local zig_toolchain; zig_toolchain = object({
 local nvcc_toolchain; nvcc_toolchain = object({
     target = {
         new = function(...)
-            return extends(clang_toolchain.target.new(...), nvcc_toolchain.target.basic)
+            local t = extends(basic_cc_toolchain.target.new(...), nvcc_toolchain.target.basic); do
+                t:cx_flags('-c -o $out --generate-dependencies-with-compile -MF $out.d $in')
+                t:ld_flags('-link $in -o $out')
+                t:ar_flags('-lib $in -o $out')
+            end
+            return t
         end,
 
         basic = {
             cc = 'nvcc',
             cxx = 'nvcc',
-            ld = 'nvcc $in -o $out',
+            ar = 'nvcc',
+            ld = 'nvcc',
+
+            dep_type = 'gcc',
+
+            -- default_libs = { 'kernel32.lib' },
+
+            flag_switch = '-',
+
+            flag_map = {
+                std = '-std',
+                define = '-D',
+                include_dir = '-I',
+                include = '-include',
+                lib_dir = '-L',
+                lib = '',
+                shared = '-shared',
+                debug_cc = '-g',
+                debug_ld = '-g',
+            },
         },
     },
 }); ninja.toolchains.nvcc = nvcc_toolchain
