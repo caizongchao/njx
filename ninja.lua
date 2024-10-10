@@ -512,11 +512,15 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 return self
             end,
 
-            type = function(self, type)
+            type = function(self, type, flags)
                 self.opts.type = type; if type == 'shared' then
-                    self:ld_flags(self:make_flag('shared'))
+                    self:ld_flags(self:make_flag(flags or 'shared'))
                 end
                 return self
+            end,
+            
+            extension = function(self, ext)
+                self.opts.extension = ext; return self
             end,
 
             src = function(self, ...)
@@ -654,13 +658,12 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 local output; if opts.type == 'phony' then
                     output = symgen(self.name .. '_phony_')
                 else
-                    output = path.combine(ninja.build_dir(), self.name .. TARGET_EXTENSION[opts.type])
+                    output = path.combine(ninja.build_dir(), self.name .. (opts.extension or TARGET_EXTENSION[opts.type]))
                 end
                 self.output = output
 
                 local defines, include_dirs, include, lib_dirs, libs = {}, {}, {}, {}, {}
                 local c_flags, cx_flags, cxx_flags, as_flags, ld_flags, ar_flags = {}, {}, {}, {}, {}, {}
-                local srcs = {}
 
                 ninja.deps_foreach(self, function(dep)
                     local mergefx = (dep == self) and options_merge or options_public_merge
@@ -676,7 +679,20 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     mergefx(as_flags, dep.opts.as_flags)
                     mergefx(ld_flags, dep.opts.ld_flags)
                     mergefx(ar_flags, dep.opts.ar_flags)
-                    mergefx(srcs, dep.opts.srcs)
+                end)
+
+                local srcs = {}; ninja.deps_foreach(self, function(dep)
+                    local dsrcs = dep.opts.srcs
+                    
+                    if (dsrcs == nil) or ((dep ~= self) and (xtype(dsrcs) ~= 'public')) then
+                        goto skip
+                    end
+
+                    for _, src in ipairs(dsrcs) do
+                        table.insert(srcs, src)
+                    end
+
+                    ::skip::
                 end)
 
                 local defines_options = options_map(defines, function(k, v)
@@ -807,19 +823,20 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                         end
 
                         local rule = xrules[ext]; if rule == nil then
-                            fatal('no rule for file: %s', src); return
+                            -- fatal('no rule for file: %s', src); return
+                            table.insert(objs, src); return
                         end
-                        
-                        local obj; if type(rule) == 'string' then
+
+                        local obj, vars; if type(rule) == 'string' then
                             obj = path.combine(build_dir, src .. '.o')
                         else
                             local tool = rule[2]; rule = rule[1]
-                            obj = tool.fx(extends({}, opts, tool.opts), src)
+                            obj, vars = tool.fx(extends({}, opts, tool.opts), src)
                         end
 
                         table.insert(objs, obj)
 
-                        C.ninja_edge_add(obj, rule, src, nil)
+                        C.ninja_edge_add(obj, rule, src, vars)
                     end
 
                     for _, src in ipairs(srcs) do
@@ -869,10 +886,10 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                                 end
 
                                 source_foreach(src, function(f)
-                                    local obj = t.fx(topts, f)
+                                    local obj, vars = t.fx(topts, f)
 
                                     table.insert(objs, obj)
-                                    C.ninja_edge_add(obj, tool_rulename, f, nil)
+                                    C.ninja_edge_add(obj, tool_rulename, f, vars)
                                 end)
                             else
                                 xtarget:configure()
@@ -1159,7 +1176,7 @@ local msvc_toolchain; msvc_toolchain = object({
 
             dep_type = 'msvc',
 
-            default_libs = { 'kernel32.lib' },
+            -- default_libs = { 'kernel32.lib' },
 
             flag_switch = '/',
 
