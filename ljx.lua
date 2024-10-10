@@ -184,6 +184,12 @@ local function fatal(code, ...)
     os.exit(code)
 end; _G.fatal = fatal
 
+local function table_size(t)
+    local count = 0
+    for _ in pairs(t) do count = count + 1 end
+    return count
+end
+
 local function table_isempty(t)
     return next(t) == nil
 end
@@ -282,6 +288,7 @@ end
 
 setmetatable(table, {
     __index = {
+        size = table_size,
         isempty = table_isempty,
         append = table_append,
         merge = table_merge,
@@ -294,6 +301,10 @@ setmetatable(table, {
         iforeach = table_iforeach,
     }
 })
+
+local function string_replace(s, x, y)
+    return string.gsub(s, x, y)
+end
 
 local function string_concat(...)
     local c = select('#', ...)
@@ -322,6 +333,7 @@ end
 
 setmetatable(string, {
     __index = {
+        replace = string_replace,
         concat = string_concat,
         split = string_split,
         starts_with = string_starts_with,

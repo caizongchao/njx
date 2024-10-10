@@ -518,7 +518,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 end
                 return self
             end,
-            
+
             extension = function(self, ext)
                 self.opts.extension = ext; return self
             end,
@@ -683,7 +683,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
                 local srcs = {}; ninja.deps_foreach(self, function(dep)
                     local dsrcs = dep.opts.srcs
-                    
+
                     if (dsrcs == nil) or ((dep ~= self) and (xtype(dsrcs) ~= 'public')) then
                         goto skip
                     end
@@ -799,20 +799,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 table.iforeach(asm_file_extensions, function(ext)
                     rules[ext] = as_rule_name
                 end)
-
-                local ld_rule_name = symgen(self.name .. '_ld_'); do
-                    C.ninja_rule_add(ld_rule_name, {
-                        command = options_tostring(self.ld, ld_options, self.default_libs),
-                        description = 'LD $out',
-                    })
-                end
-
-                local ar_rule_name = symgen(self.name .. '_ar_'); do
-                    C.ninja_rule_add(ar_rule_name, {
-                        command = options_tostring(self.ar, ar_options),
-                        description = 'AR $out',
-                    })
-                end
 
                 local objs = {}; do
                     local function add_src(src, xrules, opts)
@@ -994,8 +980,35 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                         inputs.implicit = implicits
                     end
 
-                    C.ninja_edge_add(output, pick(opts.type == 'static', ar_rule_name, ld_rule_name),
-                        inputs, nil)
+                    local ld_rule_name, ld_cmd, ld_desc, ld_vars; if opts.type == 'static' then
+                        ld_rule_name = symgen(self.name .. '_ar_')
+                        ld_cmd = options_tostring(self.ar, ar_options)
+                        ld_desc = 'AR $out'
+                    else
+                        ld_rule_name = symgen(self.name .. '_ld_')
+                        ld_cmd = options_tostring(self.ld, ld_options, self.default_libs)
+                        ld_desc = 'LD $out'
+                    end
+
+                    do
+                        local c = 0; for _, obj in ipairs(objs) do
+                            c = c + string.len(obj)
+                        end
+
+                        if c > 1024 then
+                            ld_cmd = string.replace(ld_cmd, '$in', '@$out.rsp'); ld_vars = {
+                                rspfile = '$out.rsp',
+                                rspfile_content = '$in'
+                            }
+                        end
+                    end
+
+                    C.ninja_rule_add(ld_rule_name, table.merge({
+                        command = ld_cmd,
+                        description = ld_desc,
+                    }, ld_vars))
+
+                    C.ninja_edge_add(output, ld_rule_name, inputs, nil)
 
                     if opts.default ~= false then
                         C.ninja_default_add(output)
@@ -1204,8 +1217,8 @@ local clangcl_toolchain; clangcl_toolchain = object({
         basic = {
             cc = 'clang-cl',
             cxx = 'clang-cl',
-            ar = 'llvm-lib /OUT:$out $in',
-            ld = 'lld-link $in -out:$out',
+            ar = 'llvm-lib',
+            ld = 'lld-link',
 
             -- flag_map = extends({}, msvc_toolchain.target.basic.flag_map, {
             --     debug_cc = '/Zi',
