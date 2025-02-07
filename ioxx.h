@@ -31,26 +31,26 @@ struct autofp {
 };
 
 struct autofd {
-    int fd {-1};
+    int value {-1};
 
-    autofd(int fd) : fd(fd) {}
+    autofd(int fd) : value(fd) {}
 
     autofd(autofd const &) = delete;
 
-    autofd(autofd && x) : fd(x.fd) { x.fd = -1; }
+    autofd(autofd && x) : value(x.value) { x.value = -1; }
 
-    ~autofd() { if(fd >= 0) close(fd); }
+    ~autofd() { if(value >= 0) close(value); }
 
-    operator int() { return fd; }
+    operator int() { return value; }
 
-    operator bool() { return fd >= 0; }
+    operator bool() { return value >= 0; }
 
-    int detach() { auto fd = this->fd; this->fd = -1; return fd; }
+    int detach() { auto fd = this->value; this->value = -1; return fd; }
 };
 
 static inline bool file_exists(const char * fname) {
     autofd fd(open(fname, O_RDONLY)); {
-        if(fd == -1) return false;
+        if(!fd) return false;
     }
 
     return true;
@@ -106,7 +106,7 @@ struct afile {
     autofd fd {-1};
 
     afile(const char * fname, int mode = O_RDONLY) : fd {open(fname, mode)} {
-        (fd != -1) || fatal("failed to open file %s", fname);
+        !!fd || fatal("failed to open file %s", fname);
     }
 
     afile(afile const &) = delete;

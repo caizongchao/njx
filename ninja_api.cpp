@@ -146,6 +146,8 @@ struct NinjaMain : public BuildLogUser {
     virtual bool IsPathDead(StringPiece s) const;
 };
 
+extern bool g_explaining;
+
 extern Metrics * g_metrics;
 
 static std::string $buf;
@@ -399,6 +401,8 @@ void ninja_exit_on_error(bool b) {
 }
 
 int ninja_build(lua_gcptr targets) {
+    // g_explaining = true;
+    
     StatusPrinter status($config); std::vector<const char *> paths;
 
     if(targets) {

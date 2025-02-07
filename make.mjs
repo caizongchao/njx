@@ -1,5 +1,6 @@
 import child_process from 'child_process';
 import fs from 'fs';
+import path from 'path';
 import Watcher from 'watcher';
 
 function run(cmd) {
@@ -56,7 +57,9 @@ var ninja_build_dir = 'build/ninja/'; {
     if (!fs.existsSync(ninja_build_dir)) fs.mkdirSync(ninja_build_dir);
 }
 
-var ninja_cc = `cosmoc++ -std=c++20 ${OPT} -Ideps/ninja/src -D__BUILD_LIB__ -c `
+var ninja_cc = `x86_64-unknown-cosmo-c++ ${OPT} -Ideps/ninja/src -D__BUILD_LIB__ -c `
+// var ninja_cc = `cosmoc++ -mclang -std=c++20 ${OPT} -Ideps/ninja/src -D__BUILD_LIB__ -c `
+// var ninja_cc = `cosmoc++ -mclang ${OPT} -Ideps/ninja/src -D__BUILD_LIB__ -c `
 
 function is_up_to_date(src, dst) {
     try {
@@ -88,8 +91,12 @@ async function make_libninja() {
         if (is_up_to_date(s, d)) continue;
 
         console.log('cc ' + s);
+        
+        var cmd = ninja_cc + s + ' -o ' + d; if(path.extname(s) == '.cc') {
+            cmd += ' -std=c++20';
+        }
 
-        var r = await run(ninja_cc + s + ' -o ' + d); if (!r) {
+        var r = await run(cmd); if (!r) {
             console.log('compile ' + s + ' failed'); return r;
         }
 
@@ -181,7 +188,9 @@ var luajit_build_dir = 'build/luajit/'; {
     if (!fs.existsSync(luajit_build_dir)) fs.mkdirSync(luajit_build_dir);
 }
 
-var luajit_cc = `cosmocc ${OPT} -c -Ideps/luajit/src -DLUAJIT_OS=5 -DLUAJIT_NO_UNWIND -DLJ_TARGET_HAS_GETENTROPY=1 `
+// var luajit_cc = `cosmocc ${OPT} -c -Ideps/luajit/src -DLUAJIT_OS=5 -DLUAJIT_NO_UNWIND -DLJ_TARGET_HAS_GETENTROPY=1 `
+var luajit_cc = `x86_64-unknown-cosmo-cc ${OPT} -c -Ideps/luajit/src -DLUAJIT_OS=5 -DLUAJIT_NO_UNWIND -DLJ_TARGET_HAS_GETENTROPY=1 `
+// var luajit_cc = `cosmocc -mclang ${OPT} -c -Ideps/luajit/src -DLUAJIT_OS=5 -DLUAJIT_NO_UNWIND -DLJ_TARGET_HAS_GETENTROPY=1 -Wno-null-dereference `
 
 
 async function make_libluajit() {
@@ -228,7 +237,8 @@ var libljx_build_dir = 'build/ljx/'; {
     if (!fs.existsSync(libljx_build_dir)) fs.mkdirSync(libljx_build_dir);
 }
 
-var libljx_cc = `cosmoc++ -std=c++20 ${OPT} -c -Ideps/luajit/src -Ideps/ninja/src -DLUAJIT_OS=5 `
+var libljx_cc = `x86_64-unknown-cosmo-c++ -std=c++20 ${OPT} -c -Ideps/luajit/src -Ideps/ninja/src -DLUAJIT_OS=5 `
+// var libljx_cc = `cosmoc++ -mclang -std=c++20 ${OPT} -c -Ideps/luajit/src -Ideps/ninja/src -DLUAJIT_OS=5 `
 
 async function make_libljx() {
     var dirty = false;
@@ -282,7 +292,8 @@ async function make_ljx() {
         console.log('linking ljx.exe');
         
         // let r = await run('cosmoc++ -Wl,--start-group -u ninja_initialize -L build lj_vm.o -lluajit -lljx -lninja -Wl,--end-group -o ' + ljx_build_dir + 'ljx.exe');
-        let r = await run(`cosmoc++ -std=c++20 ${OPT} -Wl,--start-group -L build deps/luajit/src/lj_vm.o -lluajit -lljx -lninja -Wl,--end-group -o `+ ljx_build_dir + 'ljx.exe');
+        // let r = await run(`cosmoc++ -std=c++20 ${OPT} -Wl,--start-group -L build deps/luajit/src/lj_vm.o -lluajit -lljx -lninja -Wl,--end-group -o `+ ljx_build_dir + 'ljx.exe');
+        let r = await run(`x86_64-unknown-cosmo-c++ -std=c++20 ${OPT} -Wl,--start-group -L build deps/luajit/src/lj_vm.o -lluajit -lljx -lninja -Wl,--end-group -o `+ ljx_build_dir + 'ljx.exe');
 
         if(r) {
             deploy();

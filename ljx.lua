@@ -606,6 +606,10 @@ local function path_remove_extension(path)
     end
 end
 
+local function path_basename(path)
+    return path_remove_extension(path_fname(path))
+end
+
 local function path_exclusions(path)
     local it = path:gmatch('[^|]+')
 
@@ -663,6 +667,7 @@ do
         path.parent = path_parent
         path.fname = path_fname
         path.dfname = path_dfname
+        path.basename = path_basename
         path.extension = path_extension
         path.remove_extension = path_remove_extension
         path.exclusions = path_exclusions

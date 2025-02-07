@@ -493,9 +493,18 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     return (v == nil) and k or (k .. v)
                 else
                     local x = self.flag_map[k]; if x == nil then
-                        x = self.flag_switch .. k
+                        if v ~= nil then
+                            return v
+                        else
+                            x = self.flag_switch .. k
+                        end
                     end
-                    return (v == nil) and x or (x .. v)
+
+                    if type(x) == 'function' then
+                        return x(v)
+                    else
+                        return (v == nil) and x or (x .. v)
+                    end
                 end
             end,
 
@@ -521,6 +530,10 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
 
             extension = function(self, ext)
                 self.opts.extension = ext; return self
+            end,
+
+            cxx_pch = function(self, pch_header)
+                self.opts.pch_header = pch_header; return self
             end,
 
             src = function(self, ...)
@@ -778,9 +791,37 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                     rules[ext] = cc_rule_name
                 end)
 
+                if opts.pch_header then
+                    opts.pch = path.combine(build_dir, path.fname(path.remove_extension(opts.pch_header)) .. '.pch')
+
+                    local pch_command = options_tostring(self.cxx,
+                        self:make_flag('pch',
+                            { cxx = cxx_options }),
+                        self:make_flag('pch',
+                            { create = { pch_header = opts.pch_header, pch = opts.pch } }))
+print('--->' .. pch_command .. '<---')
+                    local pch_rule_name = symgen(self.name .. '_pch_'); do
+                        C.ninja_rule_add(pch_rule_name, {
+                            command = pch_command,
+                            deps = dep_type,
+                            description = 'PCH ' .. opts.pch_header,
+                        })
+                    end
+
+                    C.ninja_edge_add(
+                        self:make_flag('pch', { output = { pch = opts.pch } }),
+                        pch_rule_name,
+                        self:make_flag('pch', { input = { pch_header = opts.pch_header, pch = opts.pch } }),
+                        nil
+                    )
+                end
+
                 local cxx_rule_name = symgen(self.name .. '_cxx_'); do
+                    local pch_options = opts.pch_header and
+                        self:make_flag('pch', { use = { pch_header = opts.pch_header, pch = opts.pch } }) or ''
+
                     C.ninja_rule_add(cxx_rule_name, {
-                        command = options_tostring(ccache(), self.cxx, cxx_options),
+                        command = options_tostring(ccache(), self.cxx, cxx_options, pch_options),
                         depfile = '$out.d',
                         deps = dep_type,
                         description = 'CXX $out',
@@ -801,8 +842,8 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                 end)
 
                 local objs = {}; do
-                    local function add_src(src, xrules, opts)
-                        opts = opts or {};
+                    local function add_src(src, xrules, xopts)
+                        xopts = xopts or {};
 
                         local ext = path.extension(src); if ext == '.obj' or ext == '.o' then
                             table.insert(objs, src); return
@@ -817,10 +858,14 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                             obj = path.combine(build_dir, src .. '.o')
                         else
                             local tool = rule[2]; rule = rule[1]
-                            obj, vars = tool.fx(extends({}, opts, tool.opts), src)
+                            obj, vars = tool.fx(extends({}, xopts, tool.opts), src)
                         end
 
                         table.insert(objs, obj)
+
+                        if opts.pch_header and file_is_typeof(src, cxx_file_extensions) then
+                            src = { src, implicit = opts.pch }
+                        end
 
                         C.ninja_edge_add(obj, rule, src, vars)
                     end
@@ -1076,6 +1121,12 @@ local gcc_toolchain; gcc_toolchain = object({
                 shared = '-shared',
                 debug_cc = '-g',
                 debug_ld = '-g',
+                pch_create = function(pch_header)
+                    return '-include ' .. pch_header
+                end,
+                pch_use = function(pch_header)
+                    return '-include ' .. pch_header
+                end,
             },
         },
     },
@@ -1172,7 +1223,8 @@ local msvc_toolchain; msvc_toolchain = object({
     target = {
         new = function(...)
             local t = extends(basic_cc_toolchain.target.new(...), msvc_toolchain.target.basic); do
-                t:cx_flags('/nologo /showIncludes /c /Fo$out $in')
+                t:cx_flags({ '/nologo /showIncludes', '/c $in', '/Fo$out' })
+                -- t:cx_flags('/nologo /showIncludes /c $in /Fo$out')
                 t:as_flags('/nologo /c /Fo$out $in')
                 t:ld_flags('/nologo $in /OUT:$out')
                 t:ar_flags('/nologo /OUT:$out $in')
@@ -1203,6 +1255,30 @@ local msvc_toolchain; msvc_toolchain = object({
                 shared = '/DLL',
                 debug_cc = '/Zi',
                 debug_ld = '/DEBUG /INCREMENTAL:NO',
+                pch = function(opts)
+                    if opts.cxx then
+                        opts = opts.cxx; return options_map(opts, function(k, v)
+                            if v == '/c $in' then return nil end
+                            if v == '/Fo$out' then return nil end
+
+                            return k, v
+                        end)
+                    elseif opts.input then
+                        opts = opts.input; return { path.remove_extension(opts.pch_header) .. '.cpp' }
+                    elseif opts.output then
+                        opts = opts.output; return { opts.pch, { implicit = path.remove_extension(opts.pch) .. '.o' } }
+                        -- opts = opts.output; return { opts.pch, path.remove_extension(opts.pch) .. '.o' }
+                    elseif opts.create then
+                        opts = opts.create; return '/Yc' .. opts.pch_header ..
+                            ' /Fp' .. opts.pch ..
+                            ' /Fo' .. path.remove_extension(opts.pch) .. '.o' ..
+                            ' /c ' .. path.remove_extension(opts.pch_header) .. '.cpp'
+                    elseif opts.use then
+                        opts = opts.use; return '/Yu' .. opts.pch_header .. ' /Fp' .. opts.pch
+                    end
+
+                    return nil;
+                end,
             },
         },
     },
