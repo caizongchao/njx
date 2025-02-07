@@ -799,7 +799,7 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
                             { cxx = cxx_options }),
                         self:make_flag('pch',
                             { create = { pch_header = opts.pch_header, pch = opts.pch } }))
-print('--->' .. pch_command .. '<---')
+
                     local pch_rule_name = symgen(self.name .. '_pch_'); do
                         C.ninja_rule_add(pch_rule_name, {
                             command = pch_command,
