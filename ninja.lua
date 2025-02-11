@@ -511,11 +511,6 @@ local basic_cc_toolchain; basic_cc_toolchain = object({
             deps = function(self, ...)
                 local deps = ensure_field(self.opts, 'deps', {})
                 vargs_foreach(function(x)
-                    if type(x) == 'string' then
-                        x = ninja.targets[x]; if x == nil then
-                            fatal('target not found: %s', x)
-                        end
-                    end
                     table.insert(deps, x)
                 end, ...)
                 return self
@@ -1390,10 +1385,12 @@ function ninja.targets_foreach(targets, fx)
 end
 
 function ninja.deps_foreach(target, fx)
-    local ctx = {}
-    target_walk(target, function(t)
+    target = ninja.target_of(target)
+
+    local ctx = {}; target_walk(target, function(t)
         if t ~= target then fx(t) end
     end, ctx)
+
     fx(target)
 end
 
