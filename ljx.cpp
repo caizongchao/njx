@@ -1,3 +1,4 @@
+#include "cosmo.h"
 #include "ljx.h"
 #include "ljxx.h"
 #include "ioxx.h"
@@ -28,6 +29,8 @@ extern bool $reload_build_script;
 extern "C" char * GetProgramExecutableName(void);
 
 int main(int argc, char ** argv) {
+    ShowCrashReports();
+    
     { static ninja_initializer _; }
 
     $L([&]() {

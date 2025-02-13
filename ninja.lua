@@ -1447,9 +1447,13 @@ function ninja.watch(dir, wildcard, ...)
         end
     end, ...)
 
-    local is_building = false; fs.watch(dir, function(fpath)
+    local is_building = false; local last_build_time = 0; fs.watch(dir, function(fpath)
         if C.is_build_script(fpath) then
             C.reload(); quit(); return 'break'
+        end
+
+        if (last_build_time + 0.3) > os.clock() then
+            return 'break'
         end
 
         local xmatch; do
@@ -1463,23 +1467,18 @@ function ninja.watch(dir, wildcard, ...)
 
         if xmatch then
             if is_building == false then
-                is_building = true; set_timeout(300, function()
-                    ninja.reset()
+                is_building = true; ninja.reset()
 
-                    local now = _G.clock()
+                local now = _G.clock()
 
-                    if type(targets) == 'function' then
-                        targets(fpath)
-                    else
-                        ninja.build(unpack(targets))
-                    end
+                if type(targets) == 'function' then
+                    targets(fpath)
+                else
+                    ninja.build(unpack(targets))
+                end
 
-                    -- print(string.format('time: %.3fs', (_G.clock() - now) / 1000))
+                is_building = false; last_build_time = os.clock()
 
-                    is_building = false;
-
-                    -- print('watching...')
-                end)
                 return 'break'
             end
         end

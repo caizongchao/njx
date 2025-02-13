@@ -15,6 +15,7 @@ function run(cmd) {
 }
 
 var OPT = "-O2 -g"
+// var OPT = "-O0 -g"
 
 var ninja_src = [
     'deps/ninja/src/build.cc',

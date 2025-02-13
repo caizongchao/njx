@@ -885,12 +885,12 @@ end; _G.clear_timeout = clear_timeout
 local __timeouts = table.new(32, 0)
 
 local function update_timer()
-    local c = timer_update(__timeouts); if c == 0 then
-        return
-    end
-    for i = 0, c - 1 do
-        timer_registry[__timeouts[i]]()
-    end
+    -- local c = timer_update(__timeouts); if c == 0 then
+    --     return
+    -- end
+    -- for i = 0, c - 1 do
+    --     timer_registry[__timeouts[i]]()
+    -- end
 end
 
 -- IOCP
