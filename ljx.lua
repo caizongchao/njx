@@ -994,7 +994,7 @@ local function fs_watch(dir, fx)
             nil) ~= 0)
     end
 
-    fx('.'); set_timeout(FS_WATCH_DEBOUNCE, read_change)
+    fx('.'); read_change(); -- set_timeout(FS_WATCH_DEBOUNCE, read_change)
 end; fs.watch = fs_watch
 
 -- fs_watch('r:/temp', function(fname)
