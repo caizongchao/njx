@@ -6,6 +6,5 @@
 .vs/
 .fetch/
 build/
-bin/
 logs/
 temp/
