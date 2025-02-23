@@ -7,6 +7,5 @@
 .fetch/
 build/
 bin/
-deps/
 logs/
 temp/
